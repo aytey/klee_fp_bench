@@ -143,45 +143,68 @@ before they start.
 
 ## On identical queries, outside KLEE
 
-Every number above was measured inside KLEE, where the two solvers stop being
-asked the same questions the moment one times out a query the other answered.
 1,112 queries were dumped from twenty timeout-prone drivers and replayed
-against both binaries directly. No cache, no budget, no divergence: the same
-file to each.
+against both binaries directly -- same file to each, no cache, no budget, no
+divergence. The two solvers **never disagreed** on any of the 1,082 they both
+decided, which is the one unambiguous result in this section.
 
-| | queries | geomean | median | wins | losses |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| **stp / bitwuzla** | 1,082 both solved | **0.602** | 0.623 | **890** | 159 |
+The speed result depends on how it is aggregated, and the spread is not small:
 
-39.0s against 63.4s in total -- **1.63x** -- with **zero disagreements**. Two
-queries were solved by STP and timed out by Bitwuzla; none the other way.
+| the same 1,082 queries, aggregated | stp/bitwuzla |
+| --- | ---: |
+| per query, geometric mean | **0.602** |
+| ratio of totals | 0.710 |
+| per driver, geometric mean | **1.288** |
 
-And the advantage *grows* with difficulty rather than shrinking:
+Per query STP wins by a distance; per driver it loses. Both are computed from
+the same measurements and neither is wrong. They answer different questions,
+and the reason they diverge is that this corpus is badly unbalanced:
 
-| bitwuzla's time | n | stp/bitwuzla | STP wins |
+| driver | queries | stp | bitwuzla | ratio |
+| --- | ---: | ---: | ---: | ---: |
+| mpf_set_q | 438 | 9.70s | 30.23s | **0.32** |
+| mpq_get_d | 408 | 9.37s | 22.19s | **0.42** |
+| SUNLinSolSetup_Dense | 26 | 0.83s | 0.95s | 0.87 |
+| *the other 17 drivers* | 210 | | | 1.03 - 3.98 |
+
+**Two GMP drivers are 78% of the corpus.** They are where a double is taken
+apart and reassembled, STP is three times faster on them, and they carry the
+per-query mean on their own. On seventeen of the twenty drivers STP is slower,
+by as much as 4x on gsl_sf_fermi_dirac_mhalf_e.
+
+So this replay does not establish a general per-query advantage for STP. What
+it establishes is narrower and still useful: **STP is much faster on the
+bit-manipulation queries GMP produces and slower on the special-function
+queries GSL produces**, and no amount of aggregation makes that one number.
+
+It also does not agree with the in-KLEE sweep, which had GSL at 0.791 in STP's
+favour. The corpora are different -- twenty drivers chosen for timing out,
+against 255 sampled by stride -- and the replayed queries were dumped from
+Z3-driven runs, so they are Z3's distribution. The sweep is the better-founded
+of the two.
+
+### Asking for a model costs STP six times what it costs Bitwuzla
+
+The replay above asks only `check-sat`. KLEE almost always needs a
+counterexample. Adding `(get-model)` to all 1,082:
+
+| | check-sat | with model | cost |
 | --- | ---: | ---: | ---: |
-| 0.01-0.05s | 776 | 0.741 | 599/776 |
-| 0.05-0.2s | 291 | **0.353** | 280/291 |
-| 0.2-1s | 8 | **0.333** | 8/8 |
-| 1-10s | 7 | 0.498 | 3/7 |
+| stp | 39.0s | 46.5s | **+19%** |
+| bitwuzla | 63.4s | 65.5s | +3% |
 
-An earlier reading of the in-KLEE numbers claimed STP's advantage was 21% on
-easy queries and 6% on hard ones, and proposed closing that gap. There is no
-such gap. It was an artefact of comparing two runs that had explored different
-regions and so answered different query populations.
+That asymmetry is real and it is paid on nearly every query KLEE issues. It is
+the one concrete lead this exercise produced for closing the distance between
+STP's standalone behaviour and its behaviour inside KLEE.
 
-**The interesting number is the difference between the two settings.** STP is
-1.66x faster than Bitwuzla on these queries in isolation and 1.18x faster
-inside KLEE. Whatever the harness does between the two, it gives away most of
-the advantage. That gap, not STP's solving, is where the remaining work is --
-though part of it may simply be that the standalone binary and KLEE's API path
-are not configured alike, which is the first thing to check rather than assume.
+### And a hypothesis that died
 
-**Both solvers reject `fp.to_ieee_bv`.** 26 of the 1,112 -- the operator that
-reads a float's bits as a bitvector -- are refused by STP's parser and by
-Bitwuzla's alike, so they cannot be studied standalone at all. KLEE reaches
-that operator through its API rather than through SMT-LIB, so it does not
-notice. It is a real hole in this method.
+An earlier version of this file claimed STP's advantage was 21% on easy queries
+and 6% on hard ones, and proposed work to close that gap. There is no such gap:
+that came from comparing two KLEE runs that had explored different regions and
+were therefore answering different questions. What replaced it -- that the
+answer depends on whether you count per query or per driver -- is a caution
+about method rather than a finding about solvers.
 
 ## What this does not establish
 

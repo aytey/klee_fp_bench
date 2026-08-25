@@ -33,13 +33,17 @@ printf 'query\tbytes\tstp_s\tstp_res\tbtw_s\tbtw_res\n' > "$OUT"
 # `(error "syntax error ... token: fp.to_ieee_bv")` and exits in ten
 # milliseconds, which reads exactly like a very fast solve. 26 queries in the
 # first corpus were scored as instant STP wins that way.
+# The verdict is a line that is exactly "sat" or "unsat", found anywhere in the
+# output -- not the last line. With (get-model) the last line is the tail of the
+# model, and scoring on it labelled 1084 solved queries "other".
 verdict() {
-  case "$1" in
-    ""|*"timeout"*) echo timeout ;;
-    sat) echo sat ;;
-    unsat) echo unsat ;;
+  local out=$1
+  if printf '%s\n' "$out" | grep -qx unsat; then echo unsat; return; fi
+  if printf '%s\n' "$out" | grep -qx sat;   then echo sat;   return; fi
+  case "$out" in
+    "") echo timeout ;;
     *error*|*Error*|*ERROR*) echo error ;;
-    *) echo "other" ;;
+    *) echo other ;;
   esac
 }
 
@@ -48,10 +52,10 @@ one() {
   n=$(basename "$f" .smt2)
   bytes=$(wc -c < "$f")
   t0=$(date +%s.%N)
-  sout=$(timeout "$TMO" "$STP" --SMTLIB2 "$f" 2>&1 | tail -1)
+  sout=$(timeout "$TMO" "$STP" --SMTLIB2 "$f" 2>&1)
   t1=$(date +%s.%N); ssec=$(echo "$t1 - $t0" | bc)
   t0=$(date +%s.%N)
-  bout=$(timeout "$TMO" "$BTW" "$f" 2>&1 | tail -1)
+  bout=$(timeout "$TMO" "$BTW" "$f" 2>&1)
   t1=$(date +%s.%N); bsec=$(echo "$t1 - $t0" | bc)
   printf '%s\t%s\t%.3f\t%s\t%.3f\t%s\n' \
     "$n" "$bytes" "$ssec" "$(verdict "$sout")" "$bsec" "$(verdict "$bout")"
