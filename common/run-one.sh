@@ -21,7 +21,14 @@ LIB=$1 name=$2 label=$3 search=${4:-dfs}
 OUT=${FP_BENCH_OUT:-$WORK/$LIB/runs}
 
 BUDGET=${BUDGET:-60}                  # exploration budget, seconds
-MAX_SOLVER_TIME=${MAX_SOLVER_TIME:-30}
+# 5s, not 30s. A query that is going to time out burns the whole cap and then
+# has its state discarded, and on this corpus that tail is 29% of all solver
+# time for a tenth of a percent of the queries. Measured over the 45 drivers
+# that exhaust the exploration budget, dropping the cap from 30s to 5s is
+# 2.165x the instructions per driver and +0.95 coverage points, with no driver
+# covering less -- against the -0.32 points that separates STP from Bitwuzla.
+# Lowering it does not make a hard query answerable; it makes giving up cheap.
+MAX_SOLVER_TIME=${MAX_SOLVER_TIME:-5}
 # SIGKILL if the run overruns that badly. The wall has to allow for the query
 # cap as well as the budget: KLEE only notices the budget has expired between
 # instructions, so a run ends by finishing the queries in flight and then
