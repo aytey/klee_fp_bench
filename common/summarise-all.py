@@ -83,6 +83,30 @@ def main():
                  math.exp(sum(lg) / len(lg)), sorted(ratios)[len(ratios) // 2],
                  cut))
 
+    # Each configuration's comparable set is its own: a driver is in it only if
+    # neither that configuration nor the baseline was cut off on it, and a
+    # slower configuration is cut off more often. So the rows above are each
+    # true, and they are not each other's like-for-like -- on GSL the two STP
+    # rows happened to share all 18 drivers while Z3's 12 were a subset. This
+    # block is the intersection, where every configuration can be compared to
+    # every other.
+    common = None
+    for c in labels:
+        if c == base:
+            continue
+        s = {k for k, v in rows.items() if comparable(v, c)}
+        common = s if common is None else (common & s)
+    if common:
+        print("\non the %d drivers comparable under EVERY configuration" % len(common))
+        print("%-14s %8s %7s %7s" % ("config", "geomean", "wins", "losses"))
+        for c in labels:
+            if c == base:
+                continue
+            rs = [rows[k][c]["solver"] / rows[k][base]["solver"] for k in common]
+            print("%-14s %8.3f %7d %7d"
+                  % (c, math.exp(sum(map(math.log, rs)) / len(rs)),
+                     sum(1 for r in rs if r < 1), sum(1 for r in rs if r > 1)))
+
     # The comparable set is a minority here and always will be: a driver that
     # uses its whole budget is the normal case, not the exception. For those,
     # the question is not who finished sooner -- nobody finished -- but who got
