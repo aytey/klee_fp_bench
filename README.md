@@ -9,11 +9,14 @@ is how much of that function KLEE's generated tests reach when replayed
 natively. There is no bug oracle and none is wanted — coverage under a fixed
 budget is the signal, because it is the thing a faster solver actually buys.
 
-| | |
-| --- | --- |
-| `gsl/` | GSL 2.8 — special functions, CDFs, integration, roots |
-| `gmp/` | GMP 6.3.0 — multi-precision integer, rational and float |
-| `common/` | the generator, the harness and the reports, shared by both |
+| | drivers | |
+| --- | --- | --- |
+| `gsl/` | 648 | GSL 2.8 — special functions, CDFs, integration, roots |
+| `blis/` | 2143 | BLIS — dense linear algebra, `generic` (assembly-free) build |
+| `gmp/` | 250 | GMP 6.3.0 — multi-precision integer, rational and float |
+| `sundials/` | 113 | SUNDIALS — the N_Vector layer |
+| `fftw/` | 43 | FFTW 3.3.10 — discrete transforms |
+| `common/` | | the generator, the harness and the reports |
 
 Drivers are **generated from the libraries' own headers**, not checked in, so
 moving to a newer release is a version bump rather than a rewrite. `common/
@@ -31,3 +34,39 @@ configures `--disable-assembly`. What is covered is the C fallback.
 **Sizes are bounded, not free.** A symbolic `mp_bitcnt_t` or `size_t` reaching
 an allocation makes KLEE concretise it. Those parameters are constrained with
 `klee_assume` to a small range; the generator says which, per driver.
+
+**BLIS objects are 1x1 and many of its drivers check rather than compute.** The
+constructor search takes the constructor with fewest arguments, which for BLIS
+is `bli_obj_create_1x1`, so the arithmetic covered is of degenerate dimensions.
+A good share of its 2143 are BLIS's internal `_check` functions, which validate
+arguments; a solver comparison probably wants a subset.
+
+## What the generator does
+
+`common/gen-drivers.py` reads a library's declarations through clang's AST and
+emits a driver per function whose every argument it can make symbolic. Scalars
+and arrays are direct. Enums become symbolic over exactly the enumerators clang
+reports for that type. Opaque objects are **built**, by searching for a function
+that yields one -- one that returns it, or one named like a constructor taking
+a `T *` to write through -- recursively, because a constructor's own arguments
+can be opaque in turn. SUNDIALS is the case that needs the whole mechanism:
+
+    SUNComm  a_0 = SUN_COMM_NULL;
+    SUNContext a_1; SUNContext_Create(a_0, &a_1);
+    N_Vector a = N_VNew_Serial(8, a_1);
+    { sunrealtype *p = N_VGetArrayPointer(a);
+      klee_make_symbolic(p, 8 * sizeof(sunrealtype), "a_d"); }
+
+Three heuristics in there are worth knowing about, because each one was wrong
+first and produced code that compiled:
+
+* A constructor must come from the library under test. Without that the search
+  found `realloc()` as a way to make a `void` and `__ctype_get_mb_cur_max()`
+  for a `size_t`.
+* The *emptiest* constructor is the wrong one. "Fewest arguments" picks
+  `N_VNewEmpty(ctx)` over `N_VNew_Serial(len, ctx)`, and an empty vector has no
+  storage -- the accessor returns NULL and filling it faults. Names matching
+  empty/null/shell/clone/wrap are tried last.
+* Some arguments are switches, not values. FFTW's planner flags left to a
+  bounded integer came out as 8, which is `FFTW_EXHAUSTIVE` -- telling the
+  planner to time every algorithm it knows. Those are pinned by parameter name.

@@ -209,6 +209,10 @@ LIBRARIES = {
         "header": "sundials/sundials_nvector.h",
         "internal": {},
         "prefixes": ("N_V", "SUNMat", "SUNLinSol"),
+        # Which functions may *build* something is a wider question than which
+        # get drivers: an N_Vector needs a SUNContext, and nothing named
+        # SUNContext_Create is ever going to be a driver of its own.
+        "ctor_prefixes": ("N_V", "SUN"),
         "types": SUNDIALS_TYPES,
         "includes": ["<sundials/sundials_context.h>", "<nvector/nvector_serial.h>",
                      "<sundials/sundials_math.h>"],
@@ -342,7 +346,8 @@ def main():
     decls, enums = declarations(args.include, cfg, args.cflags.split())
     ctor = Constructor(decls, cfg["types"], enums,
                        lambda elem, name: sym_array(elem, name), ARRAY_N,
-                       prefixes=cfg.get("prefixes", ())
+                       prefixes=cfg.get("ctor_prefixes")
+                                or cfg.get("prefixes", ())
                                 or tuple(cfg.get("internal", {})),
                        pins=cfg.get("pin", {}))
 

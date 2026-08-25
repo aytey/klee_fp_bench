@@ -1,0 +1,11 @@
+function	unsupported parameter type
+N_VBufPack	void *
+N_VBufPack_Serial	void *
+N_VBufUnpack	void *
+N_VBufUnpack_Serial	void *
+N_VLinearCombinationVectorArray	N_Vector **
+N_VLinearCombinationVectorArray_Serial	N_Vector **
+N_VPrintFile	FILE *
+N_VPrintFile_Serial	FILE *
+N_VScaleAddMultiVectorArray	N_Vector **
+N_VScaleAddMultiVectorArray_Serial	N_Vector **

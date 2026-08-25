@@ -109,10 +109,18 @@ class Constructor:
                                                       name, re.I):
                     self.accessors.setdefault(normalise(params[0]), (name, elem))
 
-        # Prefer the simplest way to make a thing: fewest arguments, then the
-        # one whose arguments are all scalars, then the shortest name.
+        # Prefer the simplest way to make a thing -- but not the emptiest.
+        # "Fewest arguments" alone picks N_VNewEmpty(ctx) over
+        # N_VNew_Serial(len, ctx), and an empty vector has no storage: the
+        # accessor hands back NULL, filling it faults, and every operation on
+        # it is undefined. A constructor that names itself empty, or that
+        # clones something there is nothing to clone from, is a shell to be
+        # filled in by a caller who knows what goes in it -- which the
+        # generator does not.
+        hollow = re.compile(r"(empty|null|shell|clone|wrap)", re.I)
         for t, ys in self.yielders.items():
-            ys.sort(key=lambda y: (len(y[1]),
+            ys.sort(key=lambda y: (1 if hollow.search(y[0]) else 0,
+                                   len(y[1]),
                                    0 if all(normalise(p) in self.scalars
                                             for p, _ in y[1]) else 1,
                                    len(y[0])))
