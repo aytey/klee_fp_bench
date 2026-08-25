@@ -25,6 +25,8 @@ import re
 import subprocess
 import sys
 
+from construct import Constructor, normalise as cnorm
+
 # --------------------------------------------------------------------------
 # How a parameter of a given type becomes something symbolic.
 #
@@ -132,6 +134,30 @@ GSL_TYPES = {
 }
 GSL_TYPES.update(ARRAY_TYPES)
 
+SUNDIALS_TYPES = {
+    "double":       lambda n: sym_scalar("double", n),
+    "sunrealtype":  lambda n: sym_scalar("sunrealtype", n),
+    "int":          lambda n: sym_scalar("int", n),
+    "unsigned int": lambda n: sym_scalar("unsigned int", n),
+    "long":         lambda n: sym_scalar("long", n),
+    "sunindextype": lambda n: sym_scalar("sunindextype", n, bound="8"),
+    "size_t":       lambda n: sym_scalar("size_t", n, bound="8"),
+    "SUNComm":      lambda n: (["  SUNComm %s = SUN_COMM_NULL;" % n], n),
+}
+SUNDIALS_TYPES.update(ARRAY_TYPES)
+
+BLIS_TYPES = {
+    "double":       lambda n: sym_scalar("double", n),
+    "float":        lambda n: sym_scalar("float", n),
+    "int":          lambda n: sym_scalar("int", n),
+    # Dimensions and strides. Bounded, and they reach indexing arithmetic, so
+    # a wrong one is an out-of-bounds rather than a path.
+    "dim_t":        lambda n: sym_scalar("dim_t", n, bound="4"),
+    "inc_t":        lambda n: sym_scalar("inc_t", n, bound="4"),
+    "doff_t":       lambda n: sym_scalar("doff_t", n, bound="4"),
+}
+BLIS_TYPES.update(ARRAY_TYPES)
+
 LIBRARIES = {
     "gmp": {
         "header": "gmp.h",
@@ -148,11 +174,26 @@ LIBRARIES = {
         "types": GSL_TYPES,
         "includes": ["<gsl/gsl_sf.h>", "<gsl/gsl_cdf.h>", "<gsl/gsl_math.h>"],
     },
+    "blis": {
+        "header": "blis.h",
+        "internal": {},
+        "prefixes": ("bli_",),
+        "types": BLIS_TYPES,
+        "includes": ["<blis.h>"],
+    },
+    "sundials": {
+        "header": "sundials/sundials_nvector.h",
+        "internal": {},
+        "prefixes": ("N_V", "SUNMat", "SUNLinSol"),
+        "types": SUNDIALS_TYPES,
+        "includes": ["<sundials/sundials_context.h>", "<nvector/nvector_serial.h>",
+                     "<sundials/sundials_math.h>"],
+    },
 }
 
 
 def declarations(include_dir, cfg, extra_cflags):
-    """Every function clang can see through the library's header."""
+    """Every function and enum clang can see through the library's header."""
     probe = os.path.join(os.environ.get("TMPDIR", "/tmp"), "fpbench_probe.c")
     with open(probe, "w") as f:
         for inc in cfg["includes"]:
@@ -162,13 +203,29 @@ def declarations(include_dir, cfg, extra_cflags):
     out = subprocess.run(cmd, capture_output=True, text=True).stdout
     if not out.strip():
         sys.exit("clang produced no AST; check --include and --cflags")
+    fns, enums = [], {}
     for node in json.loads(out).get("inner", []):
-        if node.get("kind") != "FunctionDecl":
-            continue
-        params = [p["type"]["qualType"]
-                  for p in node.get("inner", [])
-                  if p.get("kind") == "ParmVarDecl"]
-        yield node.get("name", ""), node["type"]["qualType"], params
+        kind = node.get("kind")
+        if kind == "EnumDecl":
+            # clang knows what values the type actually has, so a tag parameter
+            # can be symbolic over exactly those rather than over any int.
+            vals = [e["name"] for e in node.get("inner", [])
+                    if e.get("kind") == "EnumConstantDecl"]
+            for spelling in filter(None, [node.get("name")]):
+                enums[spelling] = vals
+        elif kind == "TypedefDecl":
+            inner = node.get("inner", [])
+            for i in inner:
+                if i.get("kind") == "ElaboratedType" or i.get("ownedTagDecl"):
+                    owned = i.get("ownedTagDecl", {}).get("name")
+                    if owned and owned in enums and node.get("name"):
+                        enums[node["name"]] = enums[owned]
+        elif kind == "FunctionDecl":
+            params = [p["type"]["qualType"]
+                      for p in node.get("inner", [])
+                      if p.get("kind") == "ParmVarDecl"]
+            fns.append((node.get("name", ""), node["type"]["qualType"], params))
+    return fns, enums
 
 
 def public_name(name, cfg):
@@ -186,7 +243,7 @@ def normalise(t):
     return re.sub(r"\s+", " ", t)
 
 
-def build_driver(pub, ret, params, cfg):
+def build_driver(pub, ret, params, cfg, ctor):
     """Driver source, or (None, reason) if some parameter cannot be made symbolic."""
     has_array = any(normalise(p) in ARRAY_TYPES for p in params)
 
@@ -196,9 +253,14 @@ def build_driver(pub, ret, params, cfg):
         if key == "void":
             continue
         maker = cfg["types"].get(key)
-        if maker is None:
-            return None, key
-        lines, arg = maker("a%d" % i)
+        if maker is not None:
+            lines, arg = maker("a%d" % i)
+        else:
+            # Not a type we know how to make directly -- ask whether anything
+            # in the library yields one.
+            lines, arg = ctor.build(ptype, "a%d" % i)
+            if lines is None:
+                return None, arg
         if has_array and key in ("int", "unsigned int", "long", "unsigned long",
                                  "size_t"):
             # Some integer of a function taking an array is that array's
@@ -244,17 +306,23 @@ def main():
     cfg = LIBRARIES[args.library]
     os.makedirs(args.out, exist_ok=True)
 
+    decls, enums = declarations(args.include, cfg, args.cflags.split())
+    ctor = Constructor(decls, cfg["types"], enums,
+                       lambda elem, name: sym_array(elem, name), ARRAY_N,
+                       prefixes=cfg.get("prefixes", ())
+                                or tuple(cfg.get("internal", {})))
+
     # A header can declare the same function twice -- GMP does, for the ones it
     # also offers as __GMP_EXTERN_INLINE -- and writing the driver twice would
     # make the count larger than the set.
     seen = set()
     emitted, skipped, symbols = 0, [], []
-    for name, ret, params in declarations(args.include, cfg, args.cflags.split()):
+    for name, ret, params in decls:
         pub = public_name(name, cfg)
         if pub is None or pub in seen:
             continue
         seen.add(pub)
-        src, reason = build_driver(pub, ret, params, cfg)
+        src, reason = build_driver(pub, ret, params, cfg, ctor)
         if src is None:
             skipped.append((pub, reason))
             continue

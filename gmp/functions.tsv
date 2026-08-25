@@ -23,15 +23,18 @@ mpf_fits_ulong_p	__gmpf_fits_ulong_p
 mpf_fits_ushort_p	__gmpf_fits_ushort_p
 mpf_floor	__gmpf_floor
 mpf_get_d	__gmpf_get_d
+mpf_get_d_2exp	__gmpf_get_d_2exp
 mpf_get_default_prec	__gmpf_get_default_prec
 mpf_get_prec	__gmpf_get_prec
 mpf_get_si	__gmpf_get_si
+mpf_get_str	__gmpf_get_str
 mpf_get_ui	__gmpf_get_ui
 mpf_init	__gmpf_init
 mpf_init2	__gmpf_init2
 mpf_init_set	__gmpf_init_set
 mpf_init_set_d	__gmpf_init_set_d
 mpf_init_set_si	__gmpf_init_set_si
+mpf_init_set_str	__gmpf_init_set_str
 mpf_init_set_ui	__gmpf_init_set_ui
 mpf_inits	__gmpf_inits
 mpf_integer_p	__gmpf_integer_p
@@ -49,6 +52,7 @@ mpf_set_prec	__gmpf_set_prec
 mpf_set_prec_raw	__gmpf_set_prec_raw
 mpf_set_q	__gmpf_set_q
 mpf_set_si	__gmpf_set_si
+mpf_set_str	__gmpf_set_str
 mpf_set_ui	__gmpf_set_ui
 mpf_set_z	__gmpf_set_z
 mpf_size	__gmpf_size
@@ -75,6 +79,7 @@ mpq_equal	__gmpq_equal
 mpq_get_d	__gmpq_get_d
 mpq_get_den	__gmpq_get_den
 mpq_get_num	__gmpq_get_num
+mpq_get_str	__gmpq_get_str
 mpq_init	__gmpq_init
 mpq_inits	__gmpq_inits
 mpq_inv	__gmpq_inv
@@ -87,6 +92,7 @@ mpq_set_den	__gmpq_set_den
 mpq_set_f	__gmpq_set_f
 mpq_set_num	__gmpq_set_num
 mpq_set_si	__gmpq_set_si
+mpq_set_str	__gmpq_set_str
 mpq_set_ui	__gmpq_set_ui
 mpq_set_z	__gmpq_set_z
 mpq_sub	__gmpq_sub
@@ -153,7 +159,9 @@ mpz_gcd	__gmpz_gcd
 mpz_gcd_ui	__gmpz_gcd_ui
 mpz_gcdext	__gmpz_gcdext
 mpz_get_d	__gmpz_get_d
+mpz_get_d_2exp	__gmpz_get_d_2exp
 mpz_get_si	__gmpz_get_si
+mpz_get_str	__gmpz_get_str
 mpz_get_ui	__gmpz_get_ui
 mpz_getlimbn	__gmpz_getlimbn
 mpz_hamdist	__gmpz_hamdist
@@ -162,6 +170,7 @@ mpz_init2	__gmpz_init2
 mpz_init_set	__gmpz_init_set
 mpz_init_set_d	__gmpz_init_set_d
 mpz_init_set_si	__gmpz_init_set_si
+mpz_init_set_str	__gmpz_init_set_str
 mpz_init_set_ui	__gmpz_init_set_ui
 mpz_inits	__gmpz_inits
 mpz_invert	__gmpz_invert
@@ -201,6 +210,7 @@ mpz_random2	__gmpz_random2
 mpz_realloc	__gmpz_realloc
 mpz_realloc2	__gmpz_realloc2
 mpz_remove	__gmpz_remove
+mpz_roinit_n	__gmpz_roinit_n
 mpz_root	__gmpz_root
 mpz_rootrem	__gmpz_rootrem
 mpz_scan0	__gmpz_scan0
@@ -210,6 +220,7 @@ mpz_set_d	__gmpz_set_d
 mpz_set_f	__gmpz_set_f
 mpz_set_q	__gmpz_set_q
 mpz_set_si	__gmpz_set_si
+mpz_set_str	__gmpz_set_str
 mpz_set_ui	__gmpz_set_ui
 mpz_setbit	__gmpz_setbit
 mpz_si_kronecker	__gmpz_si_kronecker

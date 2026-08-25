@@ -10,10 +10,3 @@ gsl_sf_legendre_deriv_alt_array	gsl_sf_legendre_t
 gsl_sf_legendre_deriv_alt_array_e	gsl_sf_legendre_t
 gsl_sf_legendre_deriv_array	gsl_sf_legendre_t
 gsl_sf_legendre_deriv_array_e	gsl_sf_legendre_t
-gsl_sf_mathieu_Mc_array	gsl_sf_mathieu_workspace *
-gsl_sf_mathieu_Ms_array	gsl_sf_mathieu_workspace *
-gsl_sf_mathieu_a_array	gsl_sf_mathieu_workspace *
-gsl_sf_mathieu_b_array	gsl_sf_mathieu_workspace *
-gsl_sf_mathieu_ce_array	gsl_sf_mathieu_workspace *
-gsl_sf_mathieu_free	gsl_sf_mathieu_workspace *
-gsl_sf_mathieu_se_array	gsl_sf_mathieu_workspace *
