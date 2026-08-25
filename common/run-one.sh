@@ -1,0 +1,87 @@
+#!/bin/bash
+#
+# Run one driver under one solver configuration, replay its tests, measure.
+#
+#   run-one.sh <gsl|gmp> <function> <config-label> [search]
+#
+# The configuration's actual solver arguments come from the environment, so a
+# sweep can vary them per job: SOLVER, EXTRA_ARGS, STP_LIB_DIR.
+#
+# Appends one pipe-separated row to $OUT/results.psv.
+#
+set -uo pipefail
+
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+WORK=${FP_BENCH_WORK:-/mnt/baranem/fp_bench-work}
+KLEE_BUILD=${KLEE_BUILD:-/mnt/baranem/klee-float/3.2-buildtest}
+UCLIBC=${UCLIBC:-/mnt/baranem/klee-float/3.2-deps/klee-uclibc-16}
+KLEE=${KLEE:-$KLEE_BUILD/bin/klee}
+
+LIB=$1 name=$2 label=$3 search=${4:-dfs}
+OUT=${FP_BENCH_OUT:-$WORK/$LIB/runs}
+
+BUDGET=${BUDGET:-60}                  # exploration budget, seconds
+HARD=${HARD:-$((BUDGET * 5 / 2))}     # SIGKILL if a query overruns that badly
+MAX_SOLVER_TIME=${MAX_SOLVER_TIME:-30}
+MAX_MEMORY=${MAX_MEMORY:-4000}
+REPLAY_TIMEOUT=${REPLAY_TIMEOUT:-5}
+MAX_REPLAY=${MAX_REPLAY:-0}           # 0 = replay every test
+SKIP_REPLAY=${SKIP_REPLAY:-0}
+SOLVER=${SOLVER:-stp}
+EXTRA_ARGS=${EXTRA_ARGS:-}
+STP_LIB_DIR=${STP_LIB_DIR:-}
+
+dir=$OUT/$label/$name
+log=$OUT/$label/$name.log
+mkdir -p "$(dirname "$dir")"
+rm -rf "$dir"
+
+start=$(date +%s.%N)
+LD_LIBRARY_PATH="${STP_LIB_DIR:+$STP_LIB_DIR:}${LD_LIBRARY_PATH:-}" \
+timeout -s KILL "$HARD" "$KLEE" \
+  --output-dir="$dir" \
+  --solver-backend="$SOLVER" \
+  --search="$search" \
+  --max-time="${BUDGET}s" \
+  --max-solver-time="${MAX_SOLVER_TIME}s" \
+  --max-memory="$MAX_MEMORY" \
+  --link-llvm-lib="$UCLIBC/lib/libm.a" \
+  $EXTRA_ARGS \
+  "$WORK/$LIB/obj/$name.bc" > "$log" 2>&1
+rc=$?
+end=$(date +%s.%N)
+
+ntests=$(find "$dir" -maxdepth 1 -name '*.ktest' 2>/dev/null | wc -l)
+nerr=$(find "$dir" -maxdepth 1 -name '*.err' 2>/dev/null | wc -l)
+
+prof="$dir/prof"
+cov="0,0,0,0,0,0,0,0"
+if [ "$ntests" -gt 0 ] && [ "$SKIP_REPLAY" = 0 ]; then
+  mkdir -p "$prof"
+  # As a group: a replay that dies on a signal makes the shell announce it, and
+  # a library aborting on a domain error is a normal outcome here.
+  {
+    i=0
+    for k in "$dir"/*.ktest; do
+      i=$((i + 1))
+      [ "$MAX_REPLAY" -gt 0 ] && [ "$i" -gt "$MAX_REPLAY" ] && break
+      KTEST_FILE=$k LLVM_PROFILE_FILE="$prof/$i.profraw" \
+        LD_LIBRARY_PATH="$KLEE_BUILD/lib" \
+        timeout -s KILL "$REPLAY_TIMEOUT" "$WORK/$LIB/bin/$name"
+    done
+  } > /dev/null 2>&1
+  # The symbol the coverage report carries, which is not always the name the
+  # driver is called after -- see functions.tsv.
+  sym=$(awk -F'\t' -v d="$name" '$1 == d {print $2; exit}' \
+        "$HERE/../$LIB/functions.tsv" 2>/dev/null)
+  cov=$("$HERE/coverage.py" "$WORK/$LIB/bin/$name" "$prof" "${sym:-$name}" 2>/dev/null \
+        || echo "0,0,0,0,0,0,0,0")
+fi
+nreplayed=$(find "$prof" -name '*.profraw' 2>/dev/null | wc -l)
+
+mkdir -p "$OUT"
+printf '%s|%s|%d|%s|%d|%d|%d|%s\n' \
+  "$label" "$name" "$rc" "$(echo "$end - $start" | bc)" \
+  "$ntests" "$nerr" "$nreplayed" "$cov" >> "$OUT/results.psv"
+
+rm -rf "$prof"

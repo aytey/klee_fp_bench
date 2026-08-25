@@ -33,6 +33,28 @@ import sys
 # --------------------------------------------------------------------------
 
 
+# How many elements a pointer parameter is given. Small on purpose: every
+# element is a separate symbolic object, and a length is what the surrounding
+# code branches on rather than the values.
+ARRAY_N = 8
+
+
+def sym_array(ctype, name, n=ARRAY_N):
+    """A caller-allocated buffer, symbolic in its entirety.
+
+    Fixed length, because the generator cannot know which integer parameter is
+    this array's length -- the association is a naming convention, not a type.
+    Any integer parameter of a function that takes an array is bounded to the
+    same length by build_driver, so a symbolic length cannot walk off the end.
+    That is conservative: it costs the ability to explore a length larger than
+    the buffer, which is a memory-safety question rather than a floating-point
+    one, and this is a floating-point benchmark.
+    """
+    return (["  %s %s[%d];" % (ctype, name, n),
+             '  klee_make_symbolic(%s, sizeof(%s), "%s");' % (name, name, name)],
+            name)
+
+
 def sym_scalar(ctype, name, bound=None):
     """A plain value KLEE can make symbolic directly."""
     lines = ["  %s %s;" % (ctype, name),
@@ -82,6 +104,15 @@ GMP_TYPES = {
     "size_t":        lambda n: sym_scalar("size_t", n, bound="16"),
 }
 
+ARRAY_TYPES = {
+    "double *":       lambda n: sym_array("double", n),
+    "float *":        lambda n: sym_array("float", n),
+    "int *":          lambda n: sym_array("int", n),
+    "unsigned int *": lambda n: sym_array("unsigned int", n),
+}
+
+GMP_TYPES.update({})
+
 GSL_TYPES = {
     "double":            lambda n: sym_scalar("double", n),
     "float":             lambda n: sym_scalar("float", n),
@@ -99,6 +130,7 @@ GSL_TYPES = {
     # meaningful and cheap.
     "gsl_mode_t":        lambda n: sym_scalar("gsl_mode_t", n, bound="2"),
 }
+GSL_TYPES.update(ARRAY_TYPES)
 
 LIBRARIES = {
     "gmp": {
@@ -156,6 +188,8 @@ def normalise(t):
 
 def build_driver(pub, ret, params, cfg):
     """Driver source, or (None, reason) if some parameter cannot be made symbolic."""
+    has_array = any(normalise(p) in ARRAY_TYPES for p in params)
+
     body, args = [], []
     for i, ptype in enumerate(params):
         key = normalise(ptype)
@@ -165,6 +199,14 @@ def build_driver(pub, ret, params, cfg):
         if maker is None:
             return None, key
         lines, arg = maker("a%d" % i)
+        if has_array and key in ("int", "unsigned int", "long", "unsigned long",
+                                 "size_t"):
+            # Some integer of a function taking an array is that array's
+            # length, and which one is a convention rather than a type. Bound
+            # them all rather than guess.
+            lines.append("  klee_assume(a%d <= %d);" % (i, ARRAY_N))
+            if not key.startswith("unsigned") and key != "size_t":
+                lines.append("  klee_assume(a%d >= 0);" % i)
         body += lines
         args.append(arg)
 
@@ -206,7 +248,7 @@ def main():
     # also offers as __GMP_EXTERN_INLINE -- and writing the driver twice would
     # make the count larger than the set.
     seen = set()
-    emitted, skipped = 0, []
+    emitted, skipped, symbols = 0, [], []
     for name, ret, params in declarations(args.include, cfg, args.cflags.split()):
         pub = public_name(name, cfg)
         if pub is None or pub in seen:
@@ -218,7 +260,16 @@ def main():
             continue
         with open(os.path.join(args.out, pub + ".c"), "w") as f:
             f.write(src)
+        # The public spelling is not always the symbol. GMP's mpf_add is a
+        # macro over __gmpf_add, and the coverage report knows only the latter,
+        # so the mapping has to travel with the drivers.
+        symbols.append((pub, name))
         emitted += 1
+
+    with open(os.path.join(args.out, "..", "functions.tsv"), "w") as f:
+        f.write("driver\tcoverage symbol\n")
+        for pub, sym in sorted(symbols):
+            f.write("%s\t%s\n" % (pub, sym))
 
     with open(os.path.join(args.out, "..", "skipped.tsv"), "w") as f:
         f.write("function\tunsupported parameter type\n")
