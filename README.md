@@ -9,14 +9,25 @@ is how much of that function KLEE's generated tests reach when replayed
 natively. There is no bug oracle and none is wanted — coverage under a fixed
 budget is the signal, because it is the thing a faster solver actually buys.
 
-| | drivers | |
-| --- | --- | --- |
-| `gsl/` | 648 | GSL 2.8 — special functions, CDFs, integration, roots |
-| `blis/` | 2143 | BLIS — dense linear algebra, `generic` (assembly-free) build |
-| `gmp/` | 250 | GMP 6.3.0 — multi-precision integer, rational and float |
-| `sundials/` | 113 | SUNDIALS — the N_Vector layer |
-| `fftw/` | 43 | FFTW 3.3.10 — discrete transforms |
-| `common/` | | the generator, the harness and the reports |
+| | drivers | of | |
+| --- | --- | --- | --- |
+| `gsl/` | 646 | 648 | GSL 2.8 — special functions, CDFs, integration, roots |
+| `blis/` | 484 | 2143 | BLIS — dense linear algebra, `generic` (assembly-free) build |
+| `sundials/` | 72 | 113 | SUNDIALS — the N_Vector layer |
+| `gmp/` | 58 | 250 | GMP 6.3.0 — the `mpf` layer and the double conversions |
+| `fftw/` | 28 | 43 | FFTW 3.3.10 — discrete transforms |
+| `common/` | | | the generator, the harness and the reports |
+
+The second column is what each library is *selected* down to. Every one of them
+carries a surface that computes nothing — object accessors, runtime settings,
+memory pools, argument validators — and those are legitimate coverage targets
+but they exercise no arithmetic, so they dilute a solver comparison with paths
+that never reach the solver. `--all` keeps them.
+
+GMP is cut hardest and deliberately: `mpz` is multi-precision *integer*
+arithmetic, which blasts to bitvectors and never reaches the floating-point
+theory at all. What is kept is `mpf`, plus the `_set_d`/`_get_d` conversions,
+which are where a double is taken apart and put back together.
 
 Drivers are **generated from the libraries' own headers**, not checked in, so
 moving to a newer release is a version bump rather than a rewrite. `common/
@@ -35,11 +46,10 @@ configures `--disable-assembly`. What is covered is the C fallback.
 an allocation makes KLEE concretise it. Those parameters are constrained with
 `klee_assume` to a small range; the generator says which, per driver.
 
-**BLIS objects are 1x1 and many of its drivers check rather than compute.** The
-constructor search takes the constructor with fewest arguments, which for BLIS
-is `bli_obj_create_1x1`, so the arithmetic covered is of degenerate dimensions.
-A good share of its 2143 are BLIS's internal `_check` functions, which validate
-arguments; a solver comparison probably wants a subset.
+**BLIS objects are 1x1.** The constructor search takes the constructor with
+fewest arguments, which for BLIS is `bli_obj_create_1x1`, so the arithmetic
+covered is of degenerate dimensions. Selecting the BLAS-like operations does
+not fix that.
 
 ## What the generator does
 
