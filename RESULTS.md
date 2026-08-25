@@ -1,30 +1,34 @@
 # Does STP decide these queries faster than Bitwuzla?
 
-Yes, on solver time, by about 15% per driver — and the qualifications matter
-more than the number. Half the drivers show no meaningful difference, the win
-is concentrated in four of the seven libraries, and it converts into 0.32
-points less coverage rather than more, which is too small a difference to call.
+Yes, on solver time, by about 23% per driver — and the qualifications matter
+more than the number. The win is concentrated in a few of the seven libraries,
+it does not convert into coverage, and two settings of STP itself are further
+apart than STP and Bitwuzla are.
 
-The larger finding is not about either solver. **Twenty-nine percent of all
-solver time goes to sixty-nine queries, a tenth of a percent of them, that are
-never answered** -- they hit the 30-second cap and their state is discarded.
-Both solvers spend their time the same way. That tail, not the average query,
-is where a benchmark on this corpus should be aimed.
-
-Swept 2026-08-25: 255 drivers sampled from the corpus of 1118, four
-configurations each, 1020 runs. 60s exploration budget, 30s query cap, DFS,
-twelve at a time.
+Swept twice. 255 drivers sampled from the corpus of 1118, four configurations,
+1020 runs each time, 60s exploration budget, DFS, twelve at a time. The first
+sweep used a 30-second query cap; the second used 5 seconds, after that was
+measured to be worth 2.165x the exploration. **The 5-second numbers are the
+ones to read** -- they describe the configuration this repository now
+recommends -- and the older ones are kept beside them because a headline that
+moves when a harness parameter changes should be visible as such.
 
 ## Solver time
 
-On the 117 drivers where no configuration was cut off — so all four answered
-the same questions and their times can be put side by side:
+On the drivers where no configuration was cut off — so all four answered the
+same questions and their times can be put side by side:
 
-| configuration | geomean vs bitwuzla | wins | losses |
-| --- | ---: | ---: | ---: |
-| **stp-tuned** | **0.851** | **62** | 33 |
-| stp-shipped | 1.879 | 15 | 72 |
-| z3 | 1.771 | 34 | 57 |
+| configuration | 5s cap (n=115) | 30s cap (n=117) |
+| --- | ---: | ---: |
+| **stp-tuned** | **0.773** | 0.851 |
+| stp-shipped | 1.921 | 1.879 |
+| z3 | 1.653 | 1.771 |
+
+Per driver against Bitwuzla over each configuration's own comparable set, at
+the 5-second cap: stp-tuned wins 71 and loses 32 of 129; stp-shipped wins 21
+and loses 83; Z3 wins 35 and loses 53. Tightening the cap moved STP's advantage
+from 0.851 to 0.773 and its record from 67-42 to 71-32, so the change made for
+other reasons happens to favour it.
 
 `stp-tuned` is `--stp-sat-solver=minisat --stp-incremental-engage-at=8
 --stp-adapt-incremental --use-forked-solver=false`. `stp-shipped` is MiniSat
