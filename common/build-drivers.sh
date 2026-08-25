@@ -36,6 +36,10 @@ case $LIB in
             LIBS="$WORK/fftw-cov/.libs/libfftw3.a" ;;
   blis)     INCBC=$WORK/blis-bc/inst/include;     INCCOV=$WORK/blis-cov/inst/include
             LIBS="$WORK/blis-cov/inst/lib/libblis.a" ;;
+  cxsparse) INCBC=$WORK/cxsparse-bc/inst/include/suitesparse
+            INCCOV=$WORK/cxsparse-cov/inst/include/suitesparse
+            # cxsparse before suitesparseconfig: it calls into it.
+            LIBS="$WORK/cxsparse-cov/inst/lib64/libcxsparse.a $WORK/cxsparse-cov/inst/lib64/libsuitesparseconfig.a" ;;
   openlibm) INCBC=$WORK/openlibm-bc/inst/include/openlibm
             INCCOV=$WORK/openlibm-cov/inst/include/openlibm
             LIBS="$WORK/openlibm-cov/inst/lib/libopenlibm.a" ;;

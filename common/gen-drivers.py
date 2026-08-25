@@ -356,7 +356,103 @@ OPENLIBM_TYPES = {
 }
 OPENLIBM_TYPES.update(ARRAY_TYPES)
 
+# The order of a CXSparse system. Small, because every entry is a separate
+# symbolic value and an LU of a dense 4x4 already branches on sixteen of them.
+CS_N = 4
+
+
+def cs_matrix(name):
+    """A dense CS_N x CS_N matrix in compressed-column form, symbolic in every
+    value and concrete in every index.
+
+    This is the whole reason a hand-written maker is needed. A compressed-column
+    matrix is only valid if its column pointers are monotone, start at zero, end
+    at nzmax, and its row indices are all below m -- relationships *between*
+    arguments, which is the one class of precondition the search says it cannot
+    meet. Nothing about the type says any of it.
+
+    Concrete structure is also the right answer rather than a concession. A
+    symbolic index reaches an allocation or an array subscript and gets
+    concretised or reported as a memory error, spending the run on questions
+    about integers; a symbolic value reaches cs_lu's pivot test, which is
+    `if ((t = CS_ABS (x [i])) > a)` -- a comparison of two floating-point
+    magnitudes, once per column, and the reason this library is here.
+
+    Dense-in-sparse, rather than a band or a tridiagonal, because it leaves
+    the pivot search a free choice in every column.
+    """
+    n, nz = CS_N, CS_N * CS_N
+    # Through cs_di_spalloc rather than as three stack arrays. Several of these
+    # functions resize the matrix they are given -- cs_dupl and cs_fkeep, and
+    # so droptol and dropzeros through it, all call cs_sprealloc -- and
+    # realloc() on a stack pointer is undefined. It took KLEE itself down with
+    # a core dump rather than being reported as a memory error.
+    # values=1 asks for the numerical array, triplet=0 for compressed-column.
+    return (["  cs_di *%s = cs_di_spalloc(%d, %d, %d, 1, 0);"
+             % (name, n, n, nz),
+             "  for (int k_ = 0; k_ <= %d; k_++) %s->p[k_] = k_ * %d;"
+             % (n, name, n),
+             "  for (int k_ = 0; k_ < %d; k_++) %s->i[k_] = k_ %% %d;"
+             % (nz, name, n),
+             '  klee_make_symbolic(%s->x, %d * sizeof(double), "%s_x");'
+             % (name, nz, name)], name)
+
+
+def cs_analysis(name):
+    """The symbolic analysis cs_lu wants.
+
+    Left to the search this is cs_di_sfree -- one argument, returns a cs_dis*,
+    and what it returns is NULL because it is the destructor. The recursion
+    guard rejects it and the next candidate is cs_di_schol, which computes a
+    *Cholesky* analysis: the elimination tree and column counts, not the column
+    permutation and nonzero estimates cs_lu reads.
+    """
+    m, _ = cs_matrix(name + "_a")
+    return (m + ["  cs_dis *%s = cs_di_sqr(0, %s_a, 0);" % (name, name)], name)
+
+
+CXSPARSE_TYPES = {
+    "cs_di *":  cs_matrix,
+    "cs_dis *": cs_analysis,
+    "double":   lambda n: sym_scalar("double", n),
+    "int32_t":  lambda n: sym_scalar("int32_t", n, bound=str(CS_N)),
+    "int":      lambda n: sym_scalar("int", n, bound=str(CS_N)),
+    "double *": lambda n: sym_array("double", n, CS_N),
+    "int32_t *": lambda n: sym_array("int32_t", n, CS_N),
+}
+
 LIBRARIES = {
+    "cxsparse": {
+        "header": "cs.h",
+        "internal": {},
+        # The double/int32 flavour. CXSparse also ships cs_dl (long), cs_ci and
+        # cs_cl (complex), which are the same algorithms recompiled -- four
+        # copies of every measurement, and the complex ones are not the
+        # arithmetic this benchmark is about.
+        "prefixes": ("cs_di_",),
+        "types": CXSPARSE_TYPES,
+        # order selects a fill-reducing permutation. 1 to 3 run cs_amd, which
+        # is graph code over integers: a large share of the library's lines and
+        # none of its floating point. 0 is the natural ordering, which keeps
+        # the run in the numerics. qr=0 asks sqr for an LU analysis.
+        "pin": {"order": "0", "qr": "0"},
+        # Allocation, I/O, and the integer half: the elimination tree, the
+        # orderings, the permutations, the depth-first searches. Real code, no
+        # floating point.
+        #
+        # cs_di_chol and cs_di_qr go too, for a different reason: each needs an
+        # analysis of its own shape -- cs_chol reads S->cp and S->parent, which
+        # cs_sqr does not compute at all -- and a maker cannot know which of
+        # its callers it is building for. Their numerics are still measured,
+        # through cs_di_cholsol and cs_di_qrsol, which analyse, factorise and
+        # solve in one call and need no cs_dis from outside.
+        "exclude": r"^cs_di_(malloc|calloc|realloc|free|spalloc|spfree|"
+                   r"sprealloc|dalloc|dfree|nfree|sfree|done|idone|ndone|ddone|"
+                   r"load|print|entry|compress|amd|counts|cumsum|dfs|etree|"
+                   r"post|tdfs|leaf|pinv|randperm|scc|dmperm|maxtrans|reach|"
+                   r"ereach|fkeep|permute|symperm|ipvec|pvec|chol|qr)$",
+        "includes": ["<cs.h>"],
+    },
     "openlibm": {
         "header": "openlibm_math.h",
         "internal": {},

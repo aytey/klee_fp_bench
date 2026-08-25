@@ -69,6 +69,11 @@ case $LIB in
        # too defines every symbol twice.
        ARCHIVES=(.libs/libgmp.a) ;;
   openlibm) VER=v0.8.7; REPO=https://github.com/JuliaMath/openlibm; TAG=v0.8.7 ;;
+  cxsparse) VER=git; REPO=https://github.com/DrTimothyAldenDavis/SuiteSparse
+       # SuiteSparse ships GraphBLAS, LAGraph, ParU and a dozen more; a full
+       # clone is most of a gigabyte to reach two directories. CXSparse needs
+       # only itself and SuiteSparse_config.
+       SPARSE="CXSparse SuiteSparse_config" ;;
   sundials) VER=git; REPO=https://github.com/LLNL/sundials ;;
   blis) VER=git; REPO=https://github.com/flame/blis
        # 'generic' is BLIS's assembly-free configuration, for the same reason
@@ -94,8 +99,14 @@ cd "$WORK"
 # Libraries with their own build system, cloned rather than downloaded.
 # ---------------------------------------------------------------------------
 if [ "${REPO:-}" != "" ]; then
-  [ -d "$WORK/$LIB-src" ] ||
-    git clone -q --depth 1 ${TAG:+--branch "$TAG"} "$REPO" "$WORK/$LIB-src"
+  if [ ! -d "$WORK/$LIB-src" ]; then
+    if [ -n "${SPARSE:-}" ]; then
+      git clone -q --depth 1 --filter=blob:none --sparse "$REPO" "$WORK/$LIB-src"
+      ( cd "$WORK/$LIB-src" && git sparse-checkout set $SPARSE )
+    else
+      git clone -q --depth 1 ${TAG:+--branch "$TAG"} "$REPO" "$WORK/$LIB-src"
+    fi
+  fi
 
   # Each of these has its own build system, and each needs to run it before a
   # header exists to generate from: bli_config.h and sundials_config.h are
@@ -126,6 +137,27 @@ if [ "${REPO:-}" != "" ]; then
         --disable-fortran --prefix="$dest/inst" > config.log 2>&1
       make -j"$JOBS" > build.log 2>&1
       make install > install.log 2>&1 )
+  }
+
+  build_cxsparse() {  # <destination> <cc> <cflags>
+    local dest=$1 cc=$2 cflags=$3
+    rm -rf "$dest"
+    cp -a "$WORK/$LIB-src" "$dest"
+    # The top-level CMakeLists selects subprojects, and CXSparse alone would
+    # go looking for a SuiteSparse_config it has to be told to build first.
+    #
+    # OpenMP off: SuiteSparse_config times itself with omp_get_wtime, which is
+    # an undefined reference at link time without -fopenmp, and a runtime KLEE
+    # could not call with it. Nothing in the numerics calls it.
+    cmake -S "$dest" -B "$dest/build" \
+      -DSUITESPARSE_ENABLE_PROJECTS=cxsparse \
+      -DSUITESPARSE_USE_OPENMP=OFF -DSUITESPARSE_CONFIG_USE_OPENMP=OFF \
+      -DCMAKE_C_COMPILER="$cc" -DCMAKE_C_FLAGS="$cflags" \
+      -DCMAKE_INSTALL_PREFIX="$dest/inst" \
+      -DBUILD_SHARED_LIBS=OFF -DBUILD_STATIC_LIBS=ON \
+      -DSUITESPARSE_DEMOS=OFF -DBUILD_TESTING=OFF > "$dest/config.log" 2>&1
+    cmake --build "$dest/build" -j"$JOBS" > "$dest/build.log" 2>&1
+    cmake --install "$dest/build" > "$dest/install.log" 2>&1
   }
 
   build_openlibm() {  # <destination> <cc> <cflags>
@@ -197,6 +229,8 @@ if [ "${REPO:-}" != "" ]; then
   case $LIB in
     blis)     BUILD=build_blis;     ARCS=(libblis.a);     HDR=blis.h ;;
     openlibm) BUILD=build_openlibm; ARCS=(libopenlibm.a); HDR=openlibm_math.h ;;
+    cxsparse) BUILD=build_cxsparse; ARCS=(libcxsparse.a libsuitesparseconfig.a)
+              HDR=cs.h ;;
     sundials) BUILD=build_cmake;    ARCS=(libsundials_nvecserial.a
                                           libsundials_sunmatrixdense.a
                                           libsundials_sunlinsoldense.a

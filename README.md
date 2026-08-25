@@ -17,6 +17,7 @@ budget is the signal, because it is the thing a faster solver actually buys.
 | `sundials/` | 88 | 180 | SUNDIALS — N_Vector, dense SUNMatrix, dense SUNLinearSolver |
 | `gmp/` | 58 | 250 | GMP 6.3.0 — the `mpf` layer and the double conversions |
 | `fftw/` | 27 | 43 | FFTW 3.3.10 — discrete transforms |
+| `cxsparse/` | 23 | 64 | CXSparse — sparse LU, Cholesky and QR, with pivoting |
 | `common/` | | | the generator, the harness and the reports |
 
 The second column is what each library is *selected* down to. Every one of them
@@ -45,6 +46,16 @@ it can handle completely. What it cannot handle it records, with the reason, so
 the gap is auditable rather than silent.
 
 ## Two things to know before reading any number
+
+**CXSparse matrices are dense-in-sparse and 4x4, with concrete structure.** A
+compressed-column matrix is valid only if its column pointers are monotone and
+its row indices are in range -- relationships between arguments, which the
+generator says it cannot meet -- so the structure is written by hand and only
+the values are symbolic. That is the right split as well as the necessary one:
+a symbolic index is concretised at an array subscript and spends the run on
+integers, where a symbolic value reaches `cs_lu`'s pivot test. Dense rather
+than banded, so the pivot search has a free choice in every column. What is
+not measured is anything that depends on sparsity structure.
 
 **OpenLibm is measured on its C path too**, for exactly GMP's reason: 23 of its
 x86-64 sources are assembly KLEE cannot execute, and each has a C counterpart
