@@ -21,13 +21,31 @@ LIB=$1 name=$2 label=$3 search=${4:-dfs}
 OUT=${FP_BENCH_OUT:-$WORK/$LIB/runs}
 
 BUDGET=${BUDGET:-60}                  # exploration budget, seconds
-HARD=${HARD:-$((BUDGET * 5 / 2))}     # SIGKILL if a query overruns that badly
 MAX_SOLVER_TIME=${MAX_SOLVER_TIME:-30}
+# SIGKILL if the run overruns that badly. The wall has to allow for the query
+# cap as well as the budget: KLEE only notices the budget has expired between
+# instructions, so a run ends by finishing the queries in flight and then
+# solving once per state it still holds, each of which may take the full cap.
+#
+# That is a widening, not a cure. OpenLibm's j0 and j1 are still killed here at
+# a 30s cap and still finish in seconds at a 5s one -- the cap decides how long
+# a doomed state survives, so a large cap can cost more wall time than the
+# budget it was meant to protect. A killed run is recorded as such and
+# aggregate.py already excludes it from the comparable set.
+HARD=${HARD:-$((BUDGET * 5 / 2 + MAX_SOLVER_TIME * 3))}
 MAX_MEMORY=${MAX_MEMORY:-4000}
 REPLAY_TIMEOUT=${REPLAY_TIMEOUT:-5}
 MAX_REPLAY=${MAX_REPLAY:-0}           # 0 = replay every test
 SKIP_REPLAY=${SKIP_REPLAY:-0}
 SOLVER=${SOLVER:-stp}
+# Every library here calls into a libm that has to come from somewhere, and
+# klee-uclibc's is what supplies it -- except for the library that *is* a libm.
+# Linking uclibc's alongside OpenLibm would put two definitions of sin in the
+# module and leave which one is being measured up to the linker.
+case $LIB in
+  openlibm) LINK_LIBM="" ;;
+  *)        LINK_LIBM="--link-llvm-lib=$UCLIBC/lib/libm.a" ;;
+esac
 EXTRA_ARGS=${EXTRA_ARGS:-}
 STP_LIB_DIR=${STP_LIB_DIR:-}
 
@@ -45,7 +63,7 @@ timeout -s KILL "$HARD" "$KLEE" \
   --max-time="${BUDGET}s" \
   --max-solver-time="${MAX_SOLVER_TIME}s" \
   --max-memory="$MAX_MEMORY" \
-  --link-llvm-lib="$UCLIBC/lib/libm.a" \
+  $LINK_LIBM \
   $EXTRA_ARGS \
   "$WORK/$LIB/obj/$name.bc" > "$log" 2>&1
 rc=$?

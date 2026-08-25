@@ -12,6 +12,7 @@ budget is the signal, because it is the thing a faster solver actually buys.
 | | drivers | of | |
 | --- | --- | --- | --- |
 | `gsl/` | 646 | 648 | GSL 2.8 — special functions, CDFs, integration, roots |
+| `openlibm/` | 141 | 210 | OpenLibm v0.8.7 — the elementary functions, fdlibm-derived |
 | `blis/` | 135 | 2143 | BLIS — dense linear algebra, `generic` (assembly-free) build |
 | `sundials/` | 72 | 113 | SUNDIALS — the N_Vector layer |
 | `gmp/` | 58 | 250 | GMP 6.3.0 — the `mpf` layer and the double conversions |
@@ -44,6 +45,13 @@ it can handle completely. What it cannot handle it records, with the reason, so
 the gap is auditable rather than silent.
 
 ## Two things to know before reading any number
+
+**OpenLibm is measured on its C path too**, for exactly GMP's reason: 23 of its
+x86-64 sources are assembly KLEE cannot execute, and each has a C counterpart
+in `src/`, so the build overrides `amd64_SRCS` down to `fenv.c` alone. Its
+`long double` functions are skipped rather than measured — on x86-64 that is
+the x87 80-bit format, which is not one of the IEEE widths the solvers reason
+about. That is 66 of the 69 skips, and they are listed with their reason.
 
 **GMP is measured on its C path.** GMP's `mpn` layer ships as hand-written
 assembly per architecture, and KLEE cannot execute that, so the bitcode build

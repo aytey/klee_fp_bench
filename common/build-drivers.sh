@@ -36,6 +36,9 @@ case $LIB in
             LIBS="$WORK/fftw-cov/.libs/libfftw3.a" ;;
   blis)     INCBC=$WORK/blis-bc/inst/include;     INCCOV=$WORK/blis-cov/inst/include
             LIBS="$WORK/blis-cov/inst/lib/libblis.a" ;;
+  openlibm) INCBC=$WORK/openlibm-bc/inst/include/openlibm
+            INCCOV=$WORK/openlibm-cov/inst/include/openlibm
+            LIBS="$WORK/openlibm-cov/inst/lib/libopenlibm.a" ;;
   sundials) INCBC=$WORK/sundials-bc/inst/include; INCCOV=$WORK/sundials-cov/inst/include
             # nvecserial before core: a static link resolves left to right.
             LIBS="$WORK/sundials-cov/inst/lib64/libsundials_nvecserial.a $WORK/sundials-cov/inst/lib64/libsundials_core.a" ;;

@@ -68,6 +68,7 @@ case $LIB in
        # directory, all of which libgmp.a already contains, and linking those
        # too defines every symbol twice.
        ARCHIVES=(.libs/libgmp.a) ;;
+  openlibm) VER=v0.8.7; REPO=https://github.com/JuliaMath/openlibm; TAG=v0.8.7 ;;
   sundials) VER=git; REPO=https://github.com/LLNL/sundials ;;
   blis) VER=git; REPO=https://github.com/flame/blis
        # 'generic' is BLIS's assembly-free configuration, for the same reason
@@ -93,7 +94,8 @@ cd "$WORK"
 # Libraries with their own build system, cloned rather than downloaded.
 # ---------------------------------------------------------------------------
 if [ "${REPO:-}" != "" ]; then
-  [ -d "$WORK/$LIB-src" ] || git clone -q --depth 1 "$REPO" "$WORK/$LIB-src"
+  [ -d "$WORK/$LIB-src" ] ||
+    git clone -q --depth 1 ${TAG:+--branch "$TAG"} "$REPO" "$WORK/$LIB-src"
 
   # Each of these has its own build system, and each needs to run it before a
   # header exists to generate from: bli_config.h and sundials_config.h are
@@ -124,6 +126,31 @@ if [ "${REPO:-}" != "" ]; then
         --disable-fortran --prefix="$dest/inst" > config.log 2>&1
       make -j"$JOBS" > build.log 2>&1
       make install > install.log 2>&1 )
+  }
+
+  build_openlibm() {  # <destination> <cc> <cflags>
+    local dest=$1 cc=$2 cflags=$3
+    rm -rf "$dest"
+    cp -a "$WORK/$LIB-src" "$dest"
+    ( cd "$dest"
+      # amd64_SRCS is the arch's source list, and on x86-64 it is 23 assembly
+      # files that KLEE cannot execute. Overriding it to fenv.c alone leaves
+      # the arch's floating-point environment correct while every one of those
+      # 23 falls back to the C in src/ -- the same trade GMP makes with
+      # --disable-assembly, and the same caveat applies: what is measured is
+      # the C path. ARCH stays amd64 rather than borrowing a pure-C
+      # architecture's directory, because that directory's fenv.c is written
+      # for a different machine.
+      # CFLAGS rather than CFLAGS_add: OpenLibm appends its own essentials to
+      # CFLAGS_add (-fno-builtin above all, without which clang is free to
+      # turn a call to sin into the intrinsic it is implementing), and a
+      # command-line assignment would discard them. CFLAGS is the hook it
+      # leaves free, and it suppresses OpenLibm's own -O3 when it carries a -O.
+      make -j"$JOBS" ARCH=amd64 amd64_SRCS=fenv.c \
+        CC="$cc" USEGCC=0 USECLANG=1 CFLAGS="$cflags" \
+        prefix="$dest/inst" > build.log 2>&1
+      make ARCH=amd64 amd64_SRCS=fenv.c prefix="$dest/inst" \
+        install-static install-headers > install.log 2>&1 )
   }
 
   build_blis() {  # <destination> <cc> <cflags>
@@ -169,6 +196,7 @@ if [ "${REPO:-}" != "" ]; then
   # the start, which is why nothing looked wrong until one was run.
   case $LIB in
     blis)     BUILD=build_blis;     ARCS=(libblis.a);     HDR=blis.h ;;
+    openlibm) BUILD=build_openlibm; ARCS=(libopenlibm.a); HDR=openlibm_math.h ;;
     sundials) BUILD=build_cmake;    ARCS=(libsundials_nvecserial.a
                                           libsundials_core.a)
               HDR=sundials/sundials_config.h ;;
@@ -188,8 +216,11 @@ if [ "${REPO:-}" != "" ]; then
        -Wno-implicit-function-declaration"
     parts=()
     for arc in "${ARCS[@]}"; do
+      # -print -quit rather than a pipe into head: under `set -o pipefail`,
+      # head closing the pipe kills find with SIGPIPE, the pipeline reports
+      # failure, and `set -e` takes the whole script down at the assignment.
       a=$(find "$WORK/$LIB-bc/inst" "$WORK/$LIB-bc/build" \
-            -name "$arc" 2>/dev/null | head -1)
+            -name "$arc" -print -quit 2>/dev/null)
       [ -n "$a" ] || { echo "no $arc built for $LIB" >&2; exit 1; }
       extract-bc -b "$a" -o "$WORK/$LIB.$arc.bc"
       parts+=("$WORK/$LIB.$arc.bc")
@@ -206,7 +237,7 @@ if [ "${REPO:-}" != "" ]; then
   # The generated monolithic header, which is what the generator reads and what
   # the drivers include.
   INC=$(find "$WORK/$LIB-bc/inst" "$WORK/$LIB-bc/build" -name "$(basename "$HDR")" \
-          -printf '%h\n' 2>/dev/null | head -1)
+          -printf '%h\n' -quit 2>/dev/null)
   # A header nested under a directory of its own (sundials/...) is included as
   # such, so the include path is the directory above it.
   case $HDR in */*) INC=$(dirname "$INC") ;; esac
