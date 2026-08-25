@@ -14,7 +14,7 @@ budget is the signal, because it is the thing a faster solver actually buys.
 | `gsl/` | 646 | 648 | GSL 2.8 — special functions, CDFs, integration, roots |
 | `openlibm/` | 141 | 210 | OpenLibm v0.8.7 — the elementary functions, fdlibm-derived |
 | `blis/` | 135 | 2143 | BLIS — dense linear algebra, `generic` (assembly-free) build |
-| `sundials/` | 72 | 113 | SUNDIALS — the N_Vector layer |
+| `sundials/` | 88 | 180 | SUNDIALS — N_Vector, dense SUNMatrix, dense SUNLinearSolver |
 | `gmp/` | 58 | 250 | GMP 6.3.0 — the `mpf` layer and the double conversions |
 | `fftw/` | 27 | 43 | FFTW 3.3.10 — discrete transforms |
 | `common/` | | | the generator, the harness and the reports |

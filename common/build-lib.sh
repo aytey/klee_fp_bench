@@ -198,6 +198,8 @@ if [ "${REPO:-}" != "" ]; then
     blis)     BUILD=build_blis;     ARCS=(libblis.a);     HDR=blis.h ;;
     openlibm) BUILD=build_openlibm; ARCS=(libopenlibm.a); HDR=openlibm_math.h ;;
     sundials) BUILD=build_cmake;    ARCS=(libsundials_nvecserial.a
+                                          libsundials_sunmatrixdense.a
+                                          libsundials_sunlinsoldense.a
                                           libsundials_core.a)
               HDR=sundials/sundials_config.h ;;
     fftw)     BUILD=build_autoconf; ARCS=(libfftw3.a);    HDR=fftw3.h ;;

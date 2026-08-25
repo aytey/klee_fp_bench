@@ -134,7 +134,64 @@ GSL_TYPES = {
 }
 GSL_TYPES.update(ARRAY_TYPES)
 
+# The order of a SUNDIALS system. Square, so that a dense matrix and the
+# vectors it acts on conform.
+SUN_N = 8
+
+
+def _sun_ctx(name):
+    """A context. Everything SUNDIALS builds needs one."""
+    return ["  SUNContext %s_c;" % name,
+            "  SUNContext_Create(SUN_COMM_NULL, &%s_c);" % name]
+
+
+def sun_context(name):
+    return (["  SUNContext %s;" % name,
+             "  SUNContext_Create(SUN_COMM_NULL, &%s);" % name], name)
+
+
+def sun_vector(name):
+    """A serial vector of SUN_N symbolic entries."""
+    return (_sun_ctx(name) + [
+        "  N_Vector %s = N_VNew_Serial(%d, %s_c);" % (name, SUN_N, name),
+        '  klee_make_symbolic(N_VGetArrayPointer(%s), %d * sizeof(sunrealtype),'
+        ' "%s_d");' % (name, SUN_N, name)], name)
+
+
+def sun_matrix(name):
+    """A dense SUN_N x SUN_N matrix, symbolic in every entry.
+
+    Every entry matters here. The generic accessor mechanism fills an object
+    with ARRAY_N elements, which for a square matrix is one row: the other 56
+    stayed as SUNDenseMatrix left them, which is zero, and a matrix that is
+    zero below its first row is singular. SUNLinSolSetup_Dense would take its
+    first zero pivot and return, so the partial pivoting -- the reason this
+    layer is worth measuring at all -- never ran.
+    """
+    return (_sun_ctx(name) + [
+        "  SUNMatrix %s = SUNDenseMatrix(%d, %d, %s_c);" % (name, SUN_N, SUN_N, name),
+        '  klee_make_symbolic(SUNDenseMatrix_Data(%s), %d * sizeof(sunrealtype),'
+        ' "%s_d");' % (name, SUN_N * SUN_N, name)], name)
+
+
+def sun_linsol(name):
+    """A dense linear solver, over a matrix and vector it conforms to.
+
+    Built explicitly because the search will not: it takes the yielder with
+    fewest arguments, which handed SUNLinSolSolve_Dense a band solver.
+    """
+    v, _ = sun_vector(name + "_y")
+    m, _ = sun_matrix(name + "_a")
+    return (v + m + _sun_ctx(name) + [
+        "  SUNLinearSolver %s = SUNLinSol_Dense(%s_y, %s_a, %s_c);"
+        % (name, name, name, name)], name)
+
+
 SUNDIALS_TYPES = {
+    "N_Vector":        sun_vector,
+    "SUNMatrix":       sun_matrix,
+    "SUNLinearSolver": sun_linsol,
+    "SUNContext":      sun_context,
     "double":       lambda n: sym_scalar("double", n),
     "sunrealtype":  lambda n: sym_scalar("sunrealtype", n),
     "int":          lambda n: sym_scalar("int", n),
@@ -405,13 +462,24 @@ LIBRARIES = {
         "types": SUNDIALS_TYPES,
         # What SUNDIALS calls a length.
         "sizes": {"sunindextype"},
-        "exclude": r"(GetArrayPointer|GetLength|GetCommunicator|GetVectorID|"
+        # _Band wants a banded matrix where these makers build a dense one,
+        # and a band matrix adds no floating-point decision a dense one does
+        # not already make.
+        "exclude": r"(_Band$|GetID|GetType|LastFlag|NumIters|Resid|ResNorm|"
+                   r"SetZeroGuess|SetScalingVectors|Initialize$|Free|"
+                   r"GetArrayPointer|GetLength|GetCommunicator|GetVectorID|"
                    r"Space|Print|Destroy|Clone|NewEmpty|SetArrayPointer|"
                    r"GetLocalLength|GetSubvector|GetNumSubvectors|"
                    r"GetVecAtIndex|SetVecAtIndex|BufSize|BufPack|BufUnpack|"
                    r"Enable|Copy)",
+        # The N_Vector layer alone is mostly branch-free kernels. The dense
+        # matrix and linear-solver layers are where SUNDIALS makes decisions
+        # about floating-point values: SUNLinSolSolve_Dense factorises with
+        # partial pivoting, which is a comparison of magnitudes per column.
         "includes": ["<sundials/sundials_context.h>", "<nvector/nvector_serial.h>",
-                     "<sundials/sundials_math.h>"],
+                     "<sundials/sundials_math.h>",
+                     "<sunmatrix/sunmatrix_dense.h>", "<sunmatrix/sunmatrix_band.h>",
+                     "<sunlinsol/sunlinsol_dense.h>", "<sunlinsol/sunlinsol_band.h>"],
     },
 }
 

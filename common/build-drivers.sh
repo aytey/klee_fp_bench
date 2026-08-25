@@ -40,8 +40,11 @@ case $LIB in
             INCCOV=$WORK/openlibm-cov/inst/include/openlibm
             LIBS="$WORK/openlibm-cov/inst/lib/libopenlibm.a" ;;
   sundials) INCBC=$WORK/sundials-bc/inst/include; INCCOV=$WORK/sundials-cov/inst/include
-            # nvecserial before core: a static link resolves left to right.
-            LIBS="$WORK/sundials-cov/inst/lib64/libsundials_nvecserial.a $WORK/sundials-cov/inst/lib64/libsundials_core.a" ;;
+            # Dependency order, because a static link resolves left to right:
+            # the dense solver calls the dense matrix, which calls the vector,
+            # which calls core.
+            L=$WORK/sundials-cov/inst/lib64
+            LIBS="$L/libsundials_sunlinsoldense.a $L/libsundials_sunmatrixdense.a $L/libsundials_nvecserial.a $L/libsundials_core.a" ;;
   *) echo "unknown library: $LIB" >&2; exit 2 ;;
 esac
 
