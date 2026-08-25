@@ -36,6 +36,9 @@ PYENV=${PYENV:-/mnt/baranem/klee-float/deps/pyenv}
 NATIVE_CC=${NATIVE_CC:-/usr/bin/clang}
 JOBS=${JOBS:-$(nproc)}
 
+# GSL and GMP come from ftp.gnu.org as verified tarballs. The rest are cloned:
+# their releases live on github.com, which this network reaches over git but
+# not over plain HTTP.
 case $LIB in
   gsl) VER=2.8;   URL=https://ftp.gnu.org/gnu/gsl/gsl-2.8.tar.gz
        SHA=6a99eeed15632c6354895b1dd542ed5a855c0f15d9ad1326c6fe2b2c9e423190
@@ -55,8 +58,14 @@ case $LIB in
        # directory, all of which libgmp.a already contains, and linking those
        # too defines every symbol twice.
        ARCHIVES=(.libs/libgmp.a) ;;
+  blis) VER=git; REPO=https://github.com/flame/blis
+       # 'generic' is BLIS's assembly-free configuration, for the same reason
+       # GMP takes --disable-assembly: KLEE cannot execute the tuned kernels,
+       # and every other configuration selects some.
+       BLIS_CONFIG=generic ;;
   *) echo "unknown library: $LIB" >&2; exit 2 ;;
 esac
+
 
 export PATH="$PYENV/bin:$SHIM:$LLVM_PREFIX/bin:$PATH"
 export LLVM_COMPILER=clang
@@ -68,6 +77,47 @@ mkdir -p "$WORK"
 cd "$WORK"
 
 [ -x "$PYENV/bin/wllvm" ] || "$PYENV/bin/pip" -q install wllvm
+
+# ---------------------------------------------------------------------------
+# Libraries with their own build system, cloned rather than downloaded.
+# ---------------------------------------------------------------------------
+if [ "${REPO:-}" != "" ]; then
+  [ -d "$WORK/$LIB-src" ] || git clone -q --depth 1 "$REPO" "$WORK/$LIB-src"
+
+  build_blis() {  # <destination> <cc> <cflags>
+    local dest=$1 cc=$2 cflags=$3
+    rm -rf "$dest"
+    cp -a "$WORK/$LIB-src" "$dest"
+    ( cd "$dest"
+      CC="$cc" CFLAGS="$cflags" ./configure --disable-shared --enable-static \
+        --prefix="$dest/inst" "$BLIS_CONFIG" > config.log 2>&1
+      make -j"$JOBS" > build.log 2>&1
+      make install > install.log 2>&1 )
+  }
+
+  if [ ! -f "$WORK/$LIB.bc" ]; then
+    build_blis "$WORK/$LIB-bc" wllvm \
+      "-O2 -g -fno-vectorize -fno-slp-vectorize -Wno-implicit-function-declaration"
+    a=$(find "$WORK/$LIB-bc/inst" -name 'libblis.a' | head -1)
+    extract-bc -b "$a" -o "$WORK/$LIB.bc"
+  fi
+  if [ ! -d "$WORK/$LIB-cov/inst" ]; then
+    build_blis "$WORK/$LIB-cov" "$NATIVE_CC" \
+      "-O0 -g -fprofile-instr-generate -fcoverage-mapping -Wno-implicit-function-declaration"
+  fi
+
+  # The generated monolithic header, which is what the generator reads and what
+  # the drivers include.
+  INC=$(dirname "$(find "$WORK/$LIB-bc/inst" -name 'blis.h' | head -1)")
+  rm -rf "$ROOT/$LIB/drivers"; mkdir -p "$ROOT/$LIB/drivers"
+  "$HERE/gen-drivers.py" --library "$LIB" --include "$INC" --out "$ROOT/$LIB/drivers"
+  echo
+  echo "$LIB $VER ($BLIS_CONFIG)"
+  echo "  bitcode:  $WORK/$LIB.bc"
+  echo "  header:   $INC/blis.h"
+  echo "  drivers:  $(ls "$ROOT/$LIB/drivers"/*.c 2>/dev/null | wc -l)"
+  exit 0
+fi
 
 ###############################################################################
 # 1. Fetch, and say what was fetched
