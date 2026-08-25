@@ -325,9 +325,32 @@ aborts on any floating-point node: `PLPrinter.cpp:396`, "the presentation
 language has no floating-point". KLEE's error handler turns that into
 `abort()`, so the flag crashes KLEE eleven queries in.
 
-The fix is small and known: `vc_printSMTLIB2` is in STP's C API and its
-SMT-LIB2 printer does handle floating point. Pointing KLEE's dump at it would
-make this measurable. Until then the 8x is bounded but unexplained.
+That fix was made -- KLEE's dump now uses `vc_printSMTLIB2`, which emits a
+self-contained problem -- and it turned up the reason the whole approach could
+not have worked:
+
+```
+SMTLIB2: a float-to-IEEE-bits node (an API-only operation)
+         has no SMT-LIB spelling
+```
+
+**Reinterpreting a float's bits as a bitvector has no portable spelling here.**
+STP reaches it only through its C API and cannot print it. Z3 prints it as
+`fp.to_ieee_bv`, which is an extension: STP's parser rejects the token and
+Bitwuzla's calls it an undefined symbol. So a query containing one cannot be
+exported by STP, and cannot be read back by either solver if Z3 exported it.
+
+That is not a corner case on this corpus. It is what an elementary function
+does: **45 of atan2's 94 queries contain it.** Which retracts the result this
+section was built on -- "STP and Bitwuzla are at parity outside KLEE, 1.05s
+against 1.01s over 94 queries" was measured over a set where 45 of those 94
+were instant failures for both. The 8x is not explained, and on drivers like
+this one it cannot be investigated by export at all; the in-KLEE sweep is the
+only instrument that works.
+
+There is a concrete improvement in the way: teach STP's SMT-LIB2 printer and
+parser Z3's `fp.to_ieee_bv` spelling. It would make floating-point queries
+round-trip, which is what any cross-solver comparison on this corpus needs.
 
 ## What this does not establish
 
