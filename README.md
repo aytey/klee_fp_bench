@@ -92,6 +92,30 @@ functions. Both belong in a coverage suite; only the second is a solver
 benchmark, and `aggregate.py` reports queries per driver so the difference is
 visible rather than averaged away.
 
+## Considered and not included
+
+**OSQP.** Integrated, measured, and dropped. Its only route into the numerics
+is `osqp_setup`, which equilibrates the problem, assembles a KKT matrix and
+factorises it before the first ADMM iteration. At four variables every driver
+that reached setup hit the wall without finishing it; at two, `osqp_setup`
+reached 2% of its own lines in 150 seconds, and the drivers that did return
+cleanly did so because setup had failed and they exited early. Fixing P and A
+concrete and leaving only q, l and u symbolic did not change that. Nine drivers
+of which the interesting ones never run is the shape of measurement this suite
+exists to avoid.
+
+**Qhull.** 65 of its 69 entry points take a `qhT*`, which holds two `jmp_buf`s,
+and every precision failure goes through `qh_errexit` to `longjmp` -- which
+KLEE's `runtime/POSIX/illegal.c` makes a hard error. With symbolic coordinates
+that is the common path, not the rare one.
+
+**CMSIS-DSP.** Its bulk is block arithmetic over arrays: branch-free, and this
+corpus already has more of that than it needs.
+
+**PETSc, hypre, SuperLU.** Python-driven configuration and MPI for the first
+two; for the third, near-duplicate `s/d/c/z` sources over the same sparse
+construction problem CXSparse already covers.
+
 ## What the generator does
 
 `common/gen-drivers.py` reads a library's declarations through clang's AST and
