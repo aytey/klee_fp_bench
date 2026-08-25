@@ -255,6 +255,80 @@ gave a wrong answer.
 
 The one measured lever is STP's AIG-to-CNF conversion.
 
+## Does --stp-adapt-incremental earn its place?
+
+On four drivers chosen because STP lost badly on them, dropping it looked like
+a clear win: atan2 goes from 14.92s to 3.23s and atan2f from 3.05s to 0.53s, on
+identical work. Swept over the whole corpus -- 255 drivers, three
+configurations, 765 runs, 128 comparable under all three -- it is a wash, and
+the two ways of summarising it disagree:
+
+| | stp-adapt | stp-noadapt |
+| --- | ---: | ---: |
+| geometric mean per driver, against Bitwuzla | 0.854 | **0.810** |
+| drivers won against Bitwuzla | 68 of 128 | 69 of 128 |
+| **total solver time** | **108.3s** | 141.2s |
+
+Dropping it is 5% better per driver and 30% worse in total, which is the
+signature of a policy that wins big on a few expensive drivers and loses a
+little on many cheap ones. Per library it splits four to two, with GSL neutral:
+
+| library | no-adapt / adapt |
+| --- | ---: |
+| openlibm | 0.832 |
+| blis | 0.859 |
+| cxsparse | 0.917 |
+| sundials | 0.925 |
+| gsl | 1.015 |
+| fftw | 1.078 |
+| gmp | 1.152 |
+
+**The flag stays.** atan2's 5.3x penalty is real and pathological, not typical,
+and the sample that suggested otherwise was chosen for containing exactly such
+cases. STP beats Bitwuzla either way -- 0.854 with the flag, 0.810 without --
+so this is not what separates them.
+
+## Why STP is slower inside KLEE than as a binary, and why that is still open
+
+The same nominal queries cost KLEE's STP 5-6s and the STP binary 0.8s, an 8x
+gap on atan2. Five explanations were measured and eliminated:
+
+* **Formula construction.** Per-query phase timing over 90 queries: build and
+  assert together, 0ms of 5783ms. All of it is solve.
+* **Encoding asymmetry.** Both backends use native floating point --
+  `vc_fpDivExpr` against `BITWUZLA_KIND_FP_DIV`. Neither is handed a
+  pre-blasted bitvector problem.
+* **Counterexample construction.** On atan2's queries, adding `(get-model)`
+  costs STP -3% and Bitwuzla +0%.
+* **The query timeout.** Capped at 5s and uncapped are indistinguishable:
+  5.00s against 5.49s, and 17.98s against 16.99s without incremental.
+* **Accumulating solver state.** KLEE keeps one validity checker for the whole
+  run where the Bitwuzla backend builds and destroys one per query, which
+  predicts later queries getting slower. The per-query ratio *falls* across the
+  run, 13.6x to 3.7x. The opposite.
+
+A profile says where the time goes: 53% `Minisat::Solver::propagate`, 13%
+`pickBranchLit`, 6% `cancelUntil`. **Three quarters of it is the SAT search.**
+The STP binary on the same query files barely enters MiniSat at all; its
+profile is dominated by dynamic linking and parsing.
+
+Which forces a correction to the method. "The same queries" was never true: the
+SMT-LIB corpus was produced by `--debug-z3-dump-queries`, so it is what KLEE
+hands *Z3*. Comparing it against what KLEE hands STP is not controlled, and the
+conclusion drawn from it -- that STP and Bitwuzla are at parity outside KLEE,
+so the gap must be harness overhead -- does not follow.
+
+**Both ways of capturing what KLEE actually sends STP are broken.** KLEE cannot
+print floating-point expressions as SMT-LIBv2 and says so. And
+`--debug-dump-stp-queries` calls STP's presentation-language printer, which
+aborts on any floating-point node: `PLPrinter.cpp:396`, "the presentation
+language has no floating-point". KLEE's error handler turns that into
+`abort()`, so the flag crashes KLEE eleven queries in.
+
+The fix is small and known: `vc_printSMTLIB2` is in STP's C API and its
+SMT-LIB2 printer does handle floating point. Pointing KLEE's dump at it would
+make this measurable. Until then the 8x is bounded but unexplained.
+
 ## What this does not establish
 
 **One run, one machine, no repetition.** There is no variance estimate here.

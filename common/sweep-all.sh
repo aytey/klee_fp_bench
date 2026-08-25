@@ -18,6 +18,9 @@ set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 WORK=${FP_BENCH_WORK:-/mnt/baranem/fp_bench-work}
 TABLE=${1:-$HERE/configs/backends.tsv}
+# Which subdirectory of each library's work area the runs land in, so a second
+# sweep does not overwrite the first.
+RUNS=${RUNS:-runs-all}
 
 # Where an STP carrying the MiniSat terminator lives. KLEE is linked against it
 # now, so this is belt and braces; a KLEE built against the other one would
@@ -45,7 +48,7 @@ for entry in "${LIBS[@]}"; do
   lib=$1 stride=$2
   [ -f "$WORK/$lib/drivers.txt" ] || { echo "skipping $lib: no drivers built"; continue; }
   echo "=== $lib (stride $stride) ==="
-  FP_BENCH_OUT=$WORK/$lib/runs-all \
+  FP_BENCH_OUT=$WORK/$lib/$RUNS \
     "$HERE/matrix-sweep.sh" "$lib" "$TABLE" "$stride" || echo "$lib: sweep returned $?"
 done
 
@@ -54,7 +57,7 @@ echo "########## aggregate ##########"
 for entry in "${LIBS[@]}"; do
   set -- $entry
   lib=$1
-  [ -f "$WORK/$lib/runs-all/results.psv" ] || continue
+  [ -f "$WORK/$lib/$RUNS/results.psv" ] || continue
   echo; echo "################ $lib ################"
-  FP_BENCH_OUT=$WORK/$lib/runs-all "$HERE/aggregate.py" "$lib" || true
+  FP_BENCH_OUT=$WORK/$lib/$RUNS "$HERE/aggregate.py" "$lib" || true
 done

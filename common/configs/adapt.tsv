@@ -1,0 +1,13 @@
+# Does --stp-adapt-incremental earn its place?
+#
+# It is in the configuration this repository recommends, and it was tuned on
+# fp-bench rather than on this corpus. On drivers where STP loses to Bitwuzla
+# it is a 4x to 5.5x penalty -- atan2 is 14.92s with it and 3.23s without, on
+# identical work -- but that sample was chosen for being losses. Two drivers
+# gain about 15% from it and bli_gemv is 2.44x worse without it, so the
+# question needs the unbiased corpus rather than the interesting end of it.
+#
+# label <TAB> backend <TAB> LD_LIBRARY_PATH for libstp (or -) <TAB> extra klee args
+stp-adapt	stp	$STP_TERM	--stp-sat-solver=minisat --stp-incremental-engage-at=8 --stp-adapt-incremental --use-forked-solver=false
+stp-noadapt	stp	$STP_TERM	--stp-sat-solver=minisat --stp-incremental-engage-at=8 --use-forked-solver=false
+bitwuzla	bitwuzla	-	
