@@ -373,12 +373,12 @@ def main():
         symbols.append((pub, name))
         emitted += 1
 
-    with open(os.path.join(args.out, "..", "functions.tsv"), "w") as f:
+    with open(os.path.join(args.out, "functions.tsv"), "w") as f:
         f.write("driver\tcoverage symbol\n")
         for pub, sym in sorted(symbols):
             f.write("%s\t%s\n" % (pub, sym))
 
-    with open(os.path.join(args.out, "..", "skipped.tsv"), "w") as f:
+    with open(os.path.join(args.out, "skipped.tsv"), "w") as f:
         f.write("function\tunsupported parameter type\n")
         for pub, reason in sorted(skipped):
             f.write("%s\t%s\n" % (pub, reason))

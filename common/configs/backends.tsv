@@ -1,0 +1,14 @@
+# The question this repository exists to answer: does STP decide these queries
+# faster than Bitwuzla?
+#
+# label <TAB> backend <TAB> LD_LIBRARY_PATH for libstp (or -) <TAB> extra klee args
+#
+# stp-tuned is the configuration measured best on fp-bench: MiniSat, the
+# adaptive incremental policy, and the query bounded in-process rather than by
+# forking a process per query. It needs an STP built against a MiniSat carrying
+# the terminator hook, or --max-solver-time is only enforced between calls into
+# the SAT solver.
+stp-tuned	stp	$STP_TERM	--stp-sat-solver=minisat --stp-incremental-engage-at=8 --stp-adapt-incremental --use-forked-solver=false
+stp-shipped	stp	$STP_TERM	--stp-sat-solver=minisat
+bitwuzla	bitwuzla	-	
+z3	z3	-	

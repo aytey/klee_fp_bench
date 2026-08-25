@@ -1,7 +1,0 @@
-function	unsupported parameter type
-mpf_urandomb	gmp_randstate_ptr
-mpz_export	void *
-mpz_import	void *
-mpz_rrandomb	gmp_randstate_ptr
-mpz_urandomb	gmp_randstate_ptr
-mpz_urandomm	gmp_randstate_ptr

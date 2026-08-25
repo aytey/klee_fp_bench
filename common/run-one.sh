@@ -73,7 +73,7 @@ if [ "$ntests" -gt 0 ] && [ "$SKIP_REPLAY" = 0 ]; then
   # The symbol the coverage report carries, which is not always the name the
   # driver is called after -- see functions.tsv.
   sym=$(awk -F'\t' -v d="$name" '$1 == d {print $2; exit}' \
-        "$HERE/../$LIB/functions.tsv" 2>/dev/null)
+        "$HERE/../$LIB/drivers/functions.tsv" 2>/dev/null)
   cov=$("$HERE/coverage.py" "$WORK/$LIB/bin/$name" "$prof" "${sym:-$name}" 2>/dev/null \
         || echo "0,0,0,0,0,0,0,0")
 fi
