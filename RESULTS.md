@@ -420,6 +420,60 @@ two runs that stop being able to finish at all. That is the coverage ceiling
 again: a suite already at 86% on lines that are mostly structural cannot reward
 more depth, so past a point the extra exploration is only variance.
 
+## What actually separates STP from Bitwuzla, end to end
+
+With KLEE's query dump fixed to emit SMT-LIB2, the queries KLEE sends STP can
+finally be replayed as themselves. `gsl_sf_multiply_e` -- STP 0.83s against
+Bitwuzla 0.10s inside KLEE, and free of the float-to-bits operator that blocks
+export elsewhere -- gives the controlled measurement:
+
+| gsl_sf_multiply_e, 11 queries | stp / bitwuzla |
+| --- | ---: |
+| standalone, wall clock | 3.13x |
+| **standalone, minus process startup** | **5.70x** |
+| inside KLEE | 7.94x |
+
+Process startup is 9.5ms for both and has to come out; over eleven invocations
+it was hiding nearly half the difference. What remains says the gap is
+**mostly the solver**, about 5.7x, with the harness contributing a further 1.4x
+-- not the other way round, as an earlier section of this file concluded from a
+comparison that turned out to be measuring failed parses.
+
+Two of the eleven queries carry it, and they are the two containing `fp.div`.
+STP's own breakdown on one of them:
+
+```
+ CNF Conversion:  142ms   <- 70%
+ Bit Blasting:     24ms
+ Sending to SAT:   19ms
+ SAT Solving:      14ms   <-  7%
+```
+
+The same signature as every other query STP loses on: the cost is translating
+the circuit, not searching it.
+
+### Which is what the adaptive CNF effort fixes
+
+STP's effort scale trades generation time for a smaller CNF, and its default
+makes that trade on every query. Choosing per query from the AIG size
+(`--cnf-generation-effort auto`, now the default on the `aytey_20260826_cnf_effort`
+branch) halves the deficit on exactly these queries:
+
+| on the queries KLEE sends STP | vs bitwuzla |
+| --- | ---: |
+| stp, shipped default | 5.61x |
+| **stp, auto** | **2.88x** |
+
+End to end in KLEE, over fourteen drivers spanning all seven libraries: solver
+time **0.914** against stock STP, and on the drivers not pinned at their
+exploration budget, `bli_gemv` 0.58, `atan2` 0.67, `gsl_cdf_rayleigh_P` 0.83.
+
+An earlier measurement said this change did nothing for KLEE. That test forced
+`very-low` for every query, which is not what the change does and is worse than
+either fixed level -- `very-low` loses to `medium` below about 28k AIG nodes,
+where most of KLEE's queries live. Testing an adaptive policy by pinning it to
+one of its outcomes tests something else.
+
 ## What this does not establish
 
 **One run, one machine, no repetition.** There is no variance estimate here.
