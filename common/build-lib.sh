@@ -131,30 +131,76 @@ if [ "${REPO:-}" != "" ]; then
     rm -rf "$dest"
     cp -a "$WORK/$LIB-src" "$dest"
     ( cd "$dest"
+      # --disable-tls, because KLEE cannot execute llvm.threadlocal.address
+      # and BLIS reads a thread-local error-checking level from inside
+      # bli_init_once. Every BLIS driver died there, on its first call into
+      # the library, before this. BLIS calls disabling TLS dangerous and it is
+      # -- for a program with threads in it, which a KLEE driver is not.
       CC="$cc" CFLAGS="$cflags" ./configure --disable-shared --enable-static \
+        --disable-threading --disable-tls \
         --prefix="$dest/inst" "$BLIS_CONFIG" > config.log 2>&1
-      make -j"$JOBS" > build.log 2>&1
+      # BLIS compiles its reference kernels on its own terms, appending -O3,
+      # -funsafe-math-optimizations, -ffp-contract=fast and -fopenmp-simd
+      # *after* whatever CFLAGS it was given -- so -fno-vectorize in CFLAGS is
+      # simply overruled, and the inner loop of every gemm came out as
+      # llvm.vector.reduce.fadd, which KLEE cannot execute.
+      #
+      # These four variables are where those flags live, and make lets them be
+      # replaced. Unsafe math and contraction would have to go regardless of
+      # KLEE: they let the compiler reassociate sums and fuse a multiply-add
+      # into one rounding, so the bitcode would no longer compute what the
+      # source says, in a benchmark whose whole subject is what the source
+      # says. Both builds get it, so that a replayed test computes what KLEE
+      # explored.
+      make -j"$JOBS" COMPSIMDFLAGS= \
+        CROPTFLAGS=-O2 CKOPTFLAGS=-O2 \
+        CRVECFLAGS="-fno-vectorize -fno-slp-vectorize -ffp-contract=off" \
+        CKVECFLAGS="-fno-vectorize -fno-slp-vectorize -ffp-contract=off" \
+        > build.log 2>&1
       make install > install.log 2>&1 )
   }
 
+  # A library that ships more than one archive needs all of the ones a driver
+  # calls into. SUNDIALS keeps its context and its error handling in
+  # libsundials_core, apart from the vectors in libsundials_nvecserial, and
+  # taking only the latter left SUNContext_Create outside the module: every
+  # SUNDIALS driver died on it as a failed external call, thirty instructions
+  # in, having never entered the library. The native link line had both from
+  # the start, which is why nothing looked wrong until one was run.
   case $LIB in
-    blis)     BUILD=build_blis;     ARCHIVE=libblis.a;    HDR=blis.h ;;
-    sundials) BUILD=build_cmake;    ARCHIVE=libsundials_nvecserial.a
+    blis)     BUILD=build_blis;     ARCS=(libblis.a);     HDR=blis.h ;;
+    sundials) BUILD=build_cmake;    ARCS=(libsundials_nvecserial.a
+                                          libsundials_core.a)
               HDR=sundials/sundials_config.h ;;
-    fftw)     BUILD=build_autoconf; ARCHIVE=libfftw3.a;   HDR=fftw3.h ;;
+    fftw)     BUILD=build_autoconf; ARCS=(libfftw3.a);    HDR=fftw3.h ;;
   esac
 
   if [ ! -f "$WORK/$LIB.bc" ]; then
+    # -fno-openmp-simd is the one that is not obvious. BLIS's reference
+    # kernels carry a PRAGMA_SIMD, which expands to #pragma omp simd, and
+    # clang honours that even under -fno-vectorize: the inner loop of every
+    # gemm came out as llvm.vector.reduce.fadd.v2f64, which KLEE cannot
+    # execute. Scalar is also the right shape for this benchmark -- a
+    # horizontal reduction is a different summation order, so a different
+    # rounding, from the one the source describes.
     "$BUILD" "$WORK/$LIB-bc" wllvm \
-      "-O2 -g -fno-vectorize -fno-slp-vectorize -Wno-implicit-function-declaration"
-    mapfile -t as < <(find "$WORK/$LIB-bc/inst" "$WORK/$LIB-bc/build" \
-                        -name "$ARCHIVE" 2>/dev/null | head -1)
-    [ ${#as[@]} -gt 0 ] || { echo "no $ARCHIVE built for $LIB" >&2; exit 1; }
-    extract-bc -b "${as[0]}" -o "$WORK/$LIB.bc"
+      "-O2 -g -fno-vectorize -fno-slp-vectorize -fno-openmp-simd \
+       -Wno-implicit-function-declaration"
+    parts=()
+    for arc in "${ARCS[@]}"; do
+      a=$(find "$WORK/$LIB-bc/inst" "$WORK/$LIB-bc/build" \
+            -name "$arc" 2>/dev/null | head -1)
+      [ -n "$a" ] || { echo "no $arc built for $LIB" >&2; exit 1; }
+      extract-bc -b "$a" -o "$WORK/$LIB.$arc.bc"
+      parts+=("$WORK/$LIB.$arc.bc")
+    done
+    "$LLVM_PREFIX/bin/llvm-link" "${parts[@]}" -o "$WORK/$LIB.bc"
+    rm -f "${parts[@]}"
   fi
   if [ ! -d "$WORK/$LIB-cov/inst" ]; then
     "$BUILD" "$WORK/$LIB-cov" "$NATIVE_CC" \
-      "-O0 -g -fprofile-instr-generate -fcoverage-mapping -Wno-implicit-function-declaration"
+      "-O0 -g -fprofile-instr-generate -fcoverage-mapping -fno-openmp-simd \
+       -Wno-implicit-function-declaration"
   fi
 
   # The generated monolithic header, which is what the generator reads and what

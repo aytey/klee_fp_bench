@@ -25,7 +25,7 @@ import re
 import subprocess
 import sys
 
-from construct import Constructor, normalise as cnorm
+from construct import Constructor, make as _make, normalise as cnorm
 
 # --------------------------------------------------------------------------
 # How a parameter of a given type becomes something symbolic.
@@ -162,6 +162,112 @@ FFTW_TYPES = {
 }
 FFTW_TYPES.update(ARRAY_TYPES)
 
+# The order of a BLIS matrix. Small, for the reason ARRAY_N is small.
+BLIS_N = 4
+
+# BLIS's object API hands every operand over as an opaque obj_t, and what shape
+# that object has to be is a property of the *role* the parameter plays rather
+# than of its type. Its argument checks are not advisory: bli_gemm requires
+# alpha and beta to be 1x1 and a, b, c to be matrices of a floating type, and
+# calls bli_abort() on anything else.
+#
+# So the constructor search cannot get this right, and its answer -- the
+# constructor with fewest arguments, bli_obj_create_1x1 -- was right for the
+# wrong reason. 1x1 is the one shape that is simultaneously a valid scalar, a
+# valid vector and a valid matrix, so it passes every check and computes
+# nothing: 484 drivers of dense linear algebra on single elements.
+#
+# What makes a real shape inferable is that BLIS names its parameters by role,
+# consistently, across all 499 of them. alpha and beta are scalars, x and y are
+# vectors, a and b and c are matrices. That is a fact about BLIS rather than
+# about C, which is why it lives here and not in the search.
+BLIS_ROLES = {
+    "alpha": "s", "beta": "s", "alpha_conj": "s", "rho": "s", "chi": "s",
+    "psi": "s", "kappa": "s", "norm": "s", "absq": "s", "index": "s",
+    "alphax": "s", "alphay": "s", "a11": "s", "b11": "s", "c11": "s",
+    "x": "v", "y": "v", "z": "v", "w": "v", "xt": "v",
+    "a": "m", "b": "m", "c": "m", "p": "m", "ah": "m", "at": "m",
+    "a1x": "m", "bx1": "m",
+    # bli_amaxv writes an element *index*, and checks the object it writes it
+    # into has an integer datatype rather than a floating one.
+    "index": "i",
+}
+BLIS_SHAPES = {"s": (1, 1, "double", "BLIS_DOUBLE"),
+               "v": (BLIS_N, 1, "double", "BLIS_DOUBLE"),
+               "m": (BLIS_N, BLIS_N, "double", "BLIS_DOUBLE"),
+               "i": (1, 1, "gint_t", "BLIS_INT")}
+
+
+# Structure BLIS requires of an operand but does not carry in its type. A
+# triangular solve wants a triangular object, and one built as general aborts
+# in bli_trsm_check -- which is why twenty of BLIS's most interesting
+# operations, the whole tr/he/sy family, ran nothing at all.
+#
+# Both halves are readable off the operation's own name. The prefix says what
+# structure: tr triangular, he Hermitian, sy symmetric. And which operand
+# carries it is positional in BLAS: a rank-k update accumulates *into* a
+# structured C, and everything else reads a structured A.
+BLIS_STRUC = {"tr": "BLIS_TRIANGULAR", "he": "BLIS_HERMITIAN",
+              "sy": "BLIS_SYMMETRIC"}
+
+# KLEE executes one thread and has no pthread implementation to call out to,
+# so an external call to any of these fails the state outright. BLIS runs its
+# initialisation through pthread_once and guards its runtime with a mutex, so
+# without these four every BLIS driver died on its first call into the library
+# -- and died as a failed external call, which is not a result about anything.
+#
+# Defining them in the driver puts them in the module KLEE is given, where they
+# are ordinary code it can execute. The replay binary picks them up too, which
+# is what keeps the two halves agreeing; both are single-threaded, so a once is
+# a flag and a lock is nothing.
+BLIS_PREAMBLE = [
+    "int pthread_once(pthread_once_t *o, void (*fn)(void)) {",
+    "  if (!*(int *)o) { *(int *)o = 1; fn(); }",
+    "  return 0;",
+    "}",
+    "int pthread_mutex_init(pthread_mutex_t *m, const pthread_mutexattr_t *a)",
+    "{ (void)m; (void)a; return 0; }",
+    "int pthread_mutex_lock(pthread_mutex_t *m) { (void)m; return 0; }",
+    "int pthread_mutex_unlock(pthread_mutex_t *m) { (void)m; return 0; }",
+    "",
+]
+
+
+def blis_post(pub, pname):
+    m = re.match(r"bli_(tr|he|sy)\w*$", pub)
+    if not m:
+        return []
+    target = "c" if re.search(r"r2?k$", pub) else "a"
+    if pname != target:
+        return []
+    return ["  bli_obj_set_struc(%s, &%%s);" % BLIS_STRUC[m.group(1)],
+            "  bli_obj_set_uplo(BLIS_LOWER, &%s);"]
+
+
+def blis_obj(name, pname=""):
+    """A BLIS object of the shape its parameter's role requires.
+
+    The buffer is attached rather than allocated, which is the other half of
+    the defect: bli_obj_create mallocs storage and leaves it as it found it, so
+    every driver built that way computed on whatever was already there. Here
+    the storage is the driver's own array and it is symbolic, which is the only
+    reason any of this reaches the solver.
+
+    Column-major, so rs is 1 and cs is the row count -- a stride pair that has
+    to agree with the dimensions, which is the other thing the search cannot
+    know. An unrecognised role falls back to 1x1: no worse than before, and it
+    still conforms.
+    """
+    m, n, ctype, dt = BLIS_SHAPES[BLIS_ROLES.get(pname, "s")]
+    return (["  %s %s_b[%d];" % (ctype, name, m * n),
+             '  klee_make_symbolic(%s_b, sizeof(%s_b), "%s_b");'
+             % (name, name, name),
+             "  obj_t %s;" % name,
+             "  bli_obj_create_with_attached_buffer(%s, %d, %d, %s_b,"
+             " 1, %d, &%s);" % (dt, m, n, name, m, name)],
+            "&" + name)
+
+
 BLIS_TYPES = {
     "double":       lambda n: sym_scalar("double", n),
     "float":        lambda n: sym_scalar("float", n),
@@ -171,6 +277,7 @@ BLIS_TYPES = {
     "dim_t":        lambda n: sym_scalar("dim_t", n, bound="4"),
     "inc_t":        lambda n: sym_scalar("inc_t", n, bound="4"),
     "doff_t":       lambda n: sym_scalar("doff_t", n, bound="4"),
+    "obj_t *":      blis_obj,
 }
 BLIS_TYPES.update(ARRAY_TYPES)
 
@@ -211,7 +318,7 @@ LIBRARIES = {
         # nothing.
         "after": {"fftw_plan": "fftw_execute(%s);"},
         "exclude": r"(wisdom|_print|sprint|export|import|cleanup|forget|"
-                   r"alignment_of|set_timelimit|threads|nthreads|malloc|free)",
+                   r"alignment_of|set_timelimit|thread|malloc|free)",
         "includes": ["<fftw3.h>"],
     },
     "blis": {
@@ -219,6 +326,13 @@ LIBRARIES = {
         "internal": {},
         "prefixes": ("bli_",),
         "types": BLIS_TYPES,
+        # A datatype is a shape question, not a value one: bli_gemm checks its
+        # operands are of a floating type, and a symbolic num_t ranges over
+        # BLIS_INT and BLIS_CONSTANT too, which abort. This is a
+        # double-precision benchmark, so say so.
+        "pin": {"dt": "BLIS_DOUBLE", "datatype": "BLIS_DOUBLE"},
+        "post": blis_post,
+        "preamble": BLIS_PREAMBLE,
         # BLIS is two thirds infrastructure -- object accessors, runtime
         # settings, memory pools, thread info, argument validators. Keep the
         # BLAS-like operations.
@@ -226,7 +340,21 @@ LIBRARIES = {
                   r"hemv|symv|trmv|trsv|ger|her|her2|syr|syr2|axpy|dot|scal|"
                   r"copy|add|sub|swap|norm|amax|invert|set[vm]|xpby|packm|"
                   r"unpackm)",
-        "exclude": r"_check$",
+        # ...but only through the front door. BLIS exports its blocked
+        # variants, kernel variants, control-tree builders and expert
+        # interfaces too, and those take a cntx_t, a cntl_t or a thrinfo_t
+        # that the generator can only fabricate: of 351 of them, 250 abort,
+        # crash or fail to compile, and the 101 that survive are running
+        # BLIS's plumbing rather than its arithmetic.
+        #
+        # Four more go for reasons of their own: packm_alloc and packm_init
+        # are memory-pool plumbing, and dotaxpyv and dotxaxpyf require one
+        # operand to be an *alias* of another, which is a relationship between
+        # arguments rather than a property of either -- the one class of
+        # precondition this generator says up front that it cannot meet.
+        "exclude": r"(_check$|_ex$|_int$|_ukernel$|_cntl|sup|"
+                   r"_(blk|ker|unb|unf)_var|"
+                   r"^bli_(packm_(alloc|init)|dotaxpyv|dotxaxpyf)$)",
         "includes": ["<blis.h>"],
     },
     "sundials": {
@@ -238,6 +366,8 @@ LIBRARIES = {
         # SUNContext_Create is ever going to be a driver of its own.
         "ctor_prefixes": ("N_V", "SUN"),
         "types": SUNDIALS_TYPES,
+        # What SUNDIALS calls a length.
+        "sizes": {"sunindextype"},
         "exclude": r"(GetArrayPointer|GetLength|GetCommunicator|GetVectorID|"
                    r"Space|Print|Destroy|Clone|NewEmpty|SetArrayPointer|"
                    r"GetLocalLength|GetSubvector|GetNumSubvectors|"
@@ -336,7 +466,7 @@ def build_driver(pub, ret, params, cfg, ctor):
             continue
         maker = cfg["types"].get(key)
         if maker is not None:
-            lines, arg = maker("a%d" % i)
+            lines, arg = _make(maker, "a%d" % i, pname)
         else:
             # Not a type we know how to make directly -- ask whether anything
             # in the library yields one.
@@ -352,6 +482,11 @@ def build_driver(pub, ret, params, cfg, ctor):
             if not key.startswith("unsigned") and key != "size_t":
                 lines.append("  klee_assume(a%d >= 0);" % i)
         body += lines
+        # Some libraries need a word said about an operand after it exists --
+        # see blis_post, where it is the structure BLIS checks for but cannot
+        # infer from a type.
+        for extra in cfg.get("post", lambda *_: [])(pub, pname):
+            body.append(extra % ("a%d" % i))
         args.append(arg)
 
     call = "%s(%s);" % (pub, ", ".join(args))
@@ -374,6 +509,7 @@ def build_driver(pub, ret, params, cfg, ctor):
     ] + ["#include %s" % i for i in cfg["includes"]] + [
         '#include <klee/klee.h>',
         "",
+    ] + cfg.get("preamble", []) + [
         "int main(void) {",
     ] + body + [
         "  " + call,
@@ -416,7 +552,8 @@ def main():
                        prefixes=cfg.get("ctor_prefixes")
                                 or cfg.get("prefixes", ())
                                 or tuple(cfg.get("internal", {})),
-                       pins=cfg.get("pin", {}))
+                       pins=cfg.get("pin", {}),
+                       sizes=cfg.get("sizes", ()))
 
     # A header can declare the same function twice -- GMP does, for the ones it
     # also offers as __GMP_EXTERN_INLINE -- and writing the driver twice would

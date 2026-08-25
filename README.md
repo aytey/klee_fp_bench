@@ -12,10 +12,10 @@ budget is the signal, because it is the thing a faster solver actually buys.
 | | drivers | of | |
 | --- | --- | --- | --- |
 | `gsl/` | 646 | 648 | GSL 2.8 — special functions, CDFs, integration, roots |
-| `blis/` | 484 | 2143 | BLIS — dense linear algebra, `generic` (assembly-free) build |
+| `blis/` | 135 | 2143 | BLIS — dense linear algebra, `generic` (assembly-free) build |
 | `sundials/` | 72 | 113 | SUNDIALS — the N_Vector layer |
 | `gmp/` | 58 | 250 | GMP 6.3.0 — the `mpf` layer and the double conversions |
-| `fftw/` | 28 | 43 | FFTW 3.3.10 — discrete transforms |
+| `fftw/` | 27 | 43 | FFTW 3.3.10 — discrete transforms |
 | `common/` | | | the generator, the harness and the reports |
 
 The second column is what each library is *selected* down to. Every one of them
@@ -28,6 +28,13 @@ GMP is cut hardest and deliberately: `mpz` is multi-precision *integer*
 arithmetic, which blasts to bitvectors and never reaches the floating-point
 theory at all. What is kept is `mpf`, plus the `_set_d`/`_get_d` conversions,
 which are where a double is taken apart and put back together.
+
+BLIS is cut nearly as hard, for a different reason. It exports its blocked
+variants, kernel variants, control-tree builders and expert interfaces
+alongside its API, and those take a `cntx_t` or a `cntl_t` that the generator
+can only fabricate: of 351 of them, 250 abort, crash or fail to compile, and
+the 101 that survive run BLIS's plumbing rather than its arithmetic. What is
+left is the 135 that are reached through the front door.
 
 Drivers are **generated from the libraries' own headers**, not checked in, so
 moving to a newer release is a version bump rather than a rewrite. `common/
@@ -46,10 +53,25 @@ configures `--disable-assembly`. What is covered is the C fallback.
 an allocation makes KLEE concretise it. Those parameters are constrained with
 `klee_assume` to a small range; the generator says which, per driver.
 
-**BLIS objects are 1x1.** The constructor search takes the constructor with
-fewest arguments, which for BLIS is `bli_obj_create_1x1`, so the arithmetic
-covered is of degenerate dimensions. Selecting the BLAS-like operations does
-not fix that.
+**A driver can run and still measure nothing, and only running it says so.**
+Three of the five libraries produced numbers for a long time while never
+reaching the library at all. BLIS died inside `bli_init_once` on an intrinsic
+KLEE cannot execute; SUNDIALS died on `SUNContext_Create`, which was not in the
+module because only one of its two archives was being harvested; BLIS's objects
+were built 1x1 with buffers left exactly as `malloc` returned them, so its
+arithmetic ran on whatever was already there. Each looked like a working run
+from outside — a driver that starts, a coverage figure, a row in the table.
+What found them was running one and reading the stack, and what keeps them
+found is that `run-one.sh` records errors per driver.
+
+**Not every driver asks the solver much.** A dot product and a `gemm` are
+branch-free: they build large symbolic expressions and reach the end of the
+function without ever needing a decision, so they generate one test and issue
+almost no queries. The solver load lives in the drivers that branch on a
+floating-point value — norms with their scaling tests, CDFs, the special
+functions. Both belong in a coverage suite; only the second is a solver
+benchmark, and `aggregate.py` reports queries per driver so the difference is
+visible rather than averaged away.
 
 ## What the generator does
 

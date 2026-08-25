@@ -34,6 +34,7 @@ Enums are the pleasant surprise: clang knows their enumerators, so a `num_t`
 becomes a symbolic value constrained to the values that type actually has,
 rather than an arbitrary int that means nothing to the library.
 """
+import inspect
 import re
 
 MAX_DEPTH = 3
@@ -41,6 +42,18 @@ MAX_DEPTH = 3
 # Never built, whatever the search finds: these reach the outside world, and a
 # symbolic one is either meaningless or fatal.
 DENY = re.compile(r"\b(FILE|va_list|jmp_buf|pthread_|MPI_|DIR)\b")
+
+
+def make(maker, name, pname=""):
+    """Call a type maker, handing it the parameter's name if it wants one.
+
+    Most makers need only the variable to declare. A few need to know what the
+    parameter is called, because what to build depends on the role the name
+    says the parameter plays -- see BLIS_ROLES in gen-drivers.
+    """
+    if len(inspect.signature(maker).parameters) > 1:
+        return maker(name, pname)
+    return maker(name)
 
 
 def normalise(t):
@@ -58,8 +71,12 @@ def is_pointer_to(t, target):
 class Constructor:
     """Everything the generator knows about how to make values."""
 
+    #: Integer types that are a *count* when a constructor takes one. Kept
+    #: concrete, so that the fill afterwards cannot overrun what was built.
+    SIZES = {"int", "unsigned int", "long", "unsigned long", "size_t"}
+
     def __init__(self, decls, scalars, enums, array_maker, size_n,
-                 prefixes=(), pins=None):
+                 prefixes=(), pins=None, sizes=()):
         self.scalars = scalars          # type -> maker(name) -> (lines, expr)
         self.enums = enums              # type -> [enumerator names]
         self.array_maker = array_maker  # (elem_type, name) -> (lines, expr)
@@ -71,6 +88,12 @@ class Constructor:
         self.prefixes = tuple(prefixes)
         # Arguments pinned by name rather than explored -- see gen-drivers.
         self.pins = pins or {}
+        # A library spells its own sizes: SUNDIALS calls one sunindextype, and
+        # with only the C names here N_VNew_Serial was handed a symbolic
+        # length. It allocated between zero and eight elements, the fill wrote
+        # eight into it, and every SUNDIALS driver reported a memory error on
+        # its own setup rather than a result about the vector operation.
+        self.sizes = self.SIZES | set(sizes)
 
         self.yielders = {}              # type -> [(fn, params, out_index|None)]
         self.accessors = {}             # type -> (fn, element type)
@@ -126,7 +149,8 @@ class Constructor:
                                    len(y[0])))
 
     # -- building ---------------------------------------------------------
-    def build(self, ctype, name, depth=0, visiting=None, concrete_sizes=False):
+    def build(self, ctype, name, depth=0, visiting=None, concrete_sizes=False,
+              pname=""):
         """(lines, expression) that yield a value of ctype, or None."""
         key = normalise(ctype)
         visiting = visiting or set()
@@ -140,9 +164,8 @@ class Constructor:
             return None, key
 
         if key in self.scalars:
-            lines, expr = self.scalars[key](name)
-            if concrete_sizes and key in ("int", "unsigned int", "long",
-                                          "unsigned long", "size_t"):
+            lines, expr = make(self.scalars[key], name, pname)
+            if concrete_sizes and key in self.sizes:
                 # Building an object: its size has to be the size that will be
                 # filled, not a symbolic value near it.
                 return ["  %s %s = %d;" % (key, name, self.size_n)], name
@@ -162,7 +185,7 @@ class Constructor:
             # and only one of the two spellings will have a constructor.
             if elem and "*" not in elem and elem not in visiting:
                 lines, expr = self.build(elem, name, depth, visiting,
-                                         concrete_sizes)
+                                         concrete_sizes, pname)
                 if lines is not None:
                     return lines, "&" + expr
 
@@ -188,7 +211,7 @@ class Constructor:
                 args.append("&" + name)
                 continue
             sub, expr = self.build(p, "%s_%d" % (name, i), depth + 1,
-                                   visiting, concrete_sizes=True)
+                                   visiting, concrete_sizes=True, pname=pname)
             if sub is None:
                 return None
             lines += sub
