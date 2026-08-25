@@ -206,6 +206,55 @@ were therefore answering different questions. What replaced it -- that the
 answer depends on whether you count per query or per driver -- is a caution
 about method rather than a finding about solvers.
 
+## Where STP loses, and why
+
+STP is slower than Bitwuzla on exactly one class of query, and the correlation
+across the 1,082 replayed queries is monotone:
+
+| queries containing | n | stp/bitwuzla |
+| --- | ---: | ---: |
+| `fp.div` or `fp.sqrt` | 9 | **2.45x slower** |
+| `fp.mul`, no div or sqrt | 34 | **1.49x slower** |
+| none of those | 1,039 | **0.58x -- 1.7x faster** |
+
+The multiplicative floating-point operations, and nothing else. The GMP drivers
+STP dominates contain no `fp.div` and no `fp.sqrt` at all.
+
+A 2,715-byte query with three `fp.div` and two `fp.sqrt` expands to 1.7 million
+clauses. Taking that one query apart in both solvers:
+
+| | STP | Bitwuzla | |
+| --- | ---: | ---: | --- |
+| CNF clauses | 1,703,895 | 1,374,204 | comparable |
+| CNF variables | 364,585 | 454,458 | comparable |
+| bit-blasting | 370ms | 158ms | 2.3x |
+| **AIG to CNF encoding** | **1857ms** | **542ms** | **3.4x** |
+| SAT solving | 137ms | 113ms | comparable |
+| total | 2.63s | 1.37s | 1.9x |
+
+**Bitwuzla solves it the same way STP does.** Eager bit-blasting, a CNF of the
+same order, and a SAT search that takes the same time. The whole difference is
+that it converts the circuit to CNF 3.4x faster -- 2.53M clauses per second
+against 917K. The stage that costs STP the query is the one doing no reasoning.
+
+### Two things this rules out
+
+**Abstraction.** STP's `--bv-term-abstraction` at significand widths -- the
+"abstract at 53 and 64 bits" idea that had been sitting on the backlog -- makes
+these queries **5 to 7 times slower**, monotonically worse the more it
+abstracts: 10x at width 64, 15x at width 16, every answer still correct. The
+refinement loop costs far more than the circuit it avoids. Bitwuzla, which has
+an abstraction module on by default, is also *faster with it turned off* on
+this set. It is not how either solver wins here.
+
+**Tuning.** Every relevant STP option was measured on the 43 affected queries:
+`--bb.div-v1/v2/v3`, `--bb.mult-variant`, `--bb.conjoin-constant`,
+`--bb.simplify-during-bb`, `--aig-core-simplification`, `--bb.fp-native-arith`,
+`--fp-domain-simplify`. All land between 1.8x and 2.2x. None helps, and none
+gave a wrong answer.
+
+The one measured lever is STP's AIG-to-CNF conversion.
+
 ## What this does not establish
 
 **One run, one machine, no repetition.** There is no variance estimate here.
