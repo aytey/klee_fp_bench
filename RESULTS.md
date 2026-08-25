@@ -114,6 +114,33 @@ queries. The difference was an artefact of the two runs covering different
 regions -- early DFS is query-dense, deep paths reuse the cache -- not a
 property of either solver.
 
+## The cap is worth more than the solver
+
+The tail above is 69 queries that each burn the full 30-second cap and are then
+discarded. Lowering the cap does not make them answerable; it makes them cheap
+to give up on. Measured over the 45 budget-bound drivers, 30s against 5s:
+
+| cap | instructions | coverage | drivers covering more |
+| --- | ---: | ---: | ---: |
+| 30s | 11,276,732 | 86.55% | |
+| **5s** | **13,407,067** | **87.50%** | 2 of 45, none worse |
+
+Per driver that is **2.165x the instructions** and **+0.95 coverage points**,
+against the -0.32 that separates STP from Bitwuzla. A harness parameter is
+worth about three times the choice of solver here, in the opposite direction.
+
+Read the +0.95 carefully: 43 of the 45 drivers covered exactly the same lines,
+two covered more, none covered less. It is a tail, not a broad shift.
+
+And that points at something structural. Mean coverage is already 86.55% at the
+30-second cap; doubling the exploration moves it to 87.50%. **Coverage on this
+corpus is close to saturated** -- a driver reaches most of its target function
+early and the residue is either unreachable or needs an input no amount of
+extra depth is likely to find. Which is why neither the solver nor the cap
+moves it much, and why solver time rather than coverage is where this benchmark
+discriminates. Anyone tuning against the coverage number should know that
+before they start.
+
 ## What this does not establish
 
 **One run, one machine, no repetition.** There is no variance estimate here.
