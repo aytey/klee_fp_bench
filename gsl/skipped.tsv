@@ -1,0 +1,76 @@
+function	unsupported parameter type
+gsl_sf_alf_array	double *
+gsl_sf_alf_deriv_array	double *
+gsl_sf_alf_precompute	gsl_sf_alf_t
+gsl_sf_alf_vsh_array	double *
+gsl_sf_angle_restrict_pos_e	double *
+gsl_sf_angle_restrict_symm_e	double *
+gsl_sf_bessel_In_array	double *
+gsl_sf_bessel_In_scaled_array	double *
+gsl_sf_bessel_Jn_array	double *
+gsl_sf_bessel_Kn_array	double *
+gsl_sf_bessel_Kn_scaled_array	double *
+gsl_sf_bessel_Yn_array	double *
+gsl_sf_bessel_il_scaled_array	double *
+gsl_sf_bessel_jl_array	double *
+gsl_sf_bessel_jl_steed_array	double *
+gsl_sf_bessel_kl_scaled_array	double *
+gsl_sf_bessel_sequence_Jnu_e	double *
+gsl_sf_bessel_yl_array	double *
+gsl_sf_coulomb_CL_array	double *
+gsl_sf_coulomb_wave_FG_array	double *
+gsl_sf_coulomb_wave_FG_e	double *
+gsl_sf_coulomb_wave_FGp_array	double *
+gsl_sf_coulomb_wave_F_array	double *
+gsl_sf_coulomb_wave_sphF_array	double *
+gsl_sf_elljac_e	double *
+gsl_sf_gegenpoly_array	double *
+gsl_sf_hermite_array	double *
+gsl_sf_hermite_array_deriv	double *
+gsl_sf_hermite_deriv_array	double *
+gsl_sf_hermite_func_array	double *
+gsl_sf_hermite_func_series	double *
+gsl_sf_hermite_func_series_e	double *
+gsl_sf_hermite_phys_array	double *
+gsl_sf_hermite_phys_array_der	double *
+gsl_sf_hermite_phys_der_array	double *
+gsl_sf_hermite_phys_series	double *
+gsl_sf_hermite_phys_series_e	double *
+gsl_sf_hermite_prob_array	double *
+gsl_sf_hermite_prob_array_der	double *
+gsl_sf_hermite_prob_array_deriv	double *
+gsl_sf_hermite_prob_der_array	double *
+gsl_sf_hermite_prob_deriv_array	double *
+gsl_sf_hermite_prob_series	double *
+gsl_sf_hermite_prob_series_e	double *
+gsl_sf_hermite_series	double *
+gsl_sf_hermite_series_e	double *
+gsl_sf_legendre_H3d_array	double *
+gsl_sf_legendre_Pl_array	double *
+gsl_sf_legendre_Pl_deriv_array	double *
+gsl_sf_legendre_Plm_array	double *
+gsl_sf_legendre_Plm_deriv_array	double *
+gsl_sf_legendre_array	gsl_sf_legendre_t
+gsl_sf_legendre_array_e	gsl_sf_legendre_t
+gsl_sf_legendre_deriv2_alt_array	gsl_sf_legendre_t
+gsl_sf_legendre_deriv2_alt_array_e	gsl_sf_legendre_t
+gsl_sf_legendre_deriv2_array	gsl_sf_legendre_t
+gsl_sf_legendre_deriv2_array_e	gsl_sf_legendre_t
+gsl_sf_legendre_deriv_alt_array	gsl_sf_legendre_t
+gsl_sf_legendre_deriv_alt_array_e	gsl_sf_legendre_t
+gsl_sf_legendre_deriv_array	gsl_sf_legendre_t
+gsl_sf_legendre_deriv_array_e	gsl_sf_legendre_t
+gsl_sf_legendre_sphPlm_array	double *
+gsl_sf_legendre_sphPlm_deriv_array	double *
+gsl_sf_lnbeta_sgn_e	double *
+gsl_sf_lngamma_sgn_e	double *
+gsl_sf_lnpoch_sgn_e	double *
+gsl_sf_mathieu_Mc_array	gsl_sf_mathieu_workspace *
+gsl_sf_mathieu_Ms_array	gsl_sf_mathieu_workspace *
+gsl_sf_mathieu_a_array	gsl_sf_mathieu_workspace *
+gsl_sf_mathieu_a_coeff	double *
+gsl_sf_mathieu_b_array	gsl_sf_mathieu_workspace *
+gsl_sf_mathieu_b_coeff	double *
+gsl_sf_mathieu_ce_array	gsl_sf_mathieu_workspace *
+gsl_sf_mathieu_free	gsl_sf_mathieu_workspace *
+gsl_sf_mathieu_se_array	gsl_sf_mathieu_workspace *

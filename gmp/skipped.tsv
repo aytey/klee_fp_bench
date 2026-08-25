@@ -1,0 +1,18 @@
+function	unsupported parameter type
+mpf_get_d_2exp	long *
+mpf_get_str	char *
+mpf_init_set_str	char *
+mpf_set_str	char *
+mpf_urandomb	gmp_randstate_ptr
+mpq_get_str	char *
+mpq_set_str	char *
+mpz_export	void *
+mpz_get_d_2exp	long *
+mpz_get_str	char *
+mpz_import	void *
+mpz_init_set_str	char *
+mpz_roinit_n	mp_srcptr
+mpz_rrandomb	gmp_randstate_ptr
+mpz_set_str	char *
+mpz_urandomb	gmp_randstate_ptr
+mpz_urandomm	gmp_randstate_ptr
