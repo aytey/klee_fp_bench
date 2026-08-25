@@ -141,6 +141,48 @@ moves it much, and why solver time rather than coverage is where this benchmark
 discriminates. Anyone tuning against the coverage number should know that
 before they start.
 
+## On identical queries, outside KLEE
+
+Every number above was measured inside KLEE, where the two solvers stop being
+asked the same questions the moment one times out a query the other answered.
+1,112 queries were dumped from twenty timeout-prone drivers and replayed
+against both binaries directly. No cache, no budget, no divergence: the same
+file to each.
+
+| | queries | geomean | median | wins | losses |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| **stp / bitwuzla** | 1,082 both solved | **0.602** | 0.623 | **890** | 159 |
+
+39.0s against 63.4s in total -- **1.63x** -- with **zero disagreements**. Two
+queries were solved by STP and timed out by Bitwuzla; none the other way.
+
+And the advantage *grows* with difficulty rather than shrinking:
+
+| bitwuzla's time | n | stp/bitwuzla | STP wins |
+| --- | ---: | ---: | ---: |
+| 0.01-0.05s | 776 | 0.741 | 599/776 |
+| 0.05-0.2s | 291 | **0.353** | 280/291 |
+| 0.2-1s | 8 | **0.333** | 8/8 |
+| 1-10s | 7 | 0.498 | 3/7 |
+
+An earlier reading of the in-KLEE numbers claimed STP's advantage was 21% on
+easy queries and 6% on hard ones, and proposed closing that gap. There is no
+such gap. It was an artefact of comparing two runs that had explored different
+regions and so answered different query populations.
+
+**The interesting number is the difference between the two settings.** STP is
+1.66x faster than Bitwuzla on these queries in isolation and 1.18x faster
+inside KLEE. Whatever the harness does between the two, it gives away most of
+the advantage. That gap, not STP's solving, is where the remaining work is --
+though part of it may simply be that the standalone binary and KLEE's API path
+are not configured alike, which is the first thing to check rather than assume.
+
+**Both solvers reject `fp.to_ieee_bv`.** 26 of the 1,112 -- the operator that
+reads a float's bits as a bitvector -- are refused by STP's parser and by
+Bitwuzla's alike, so they cannot be studied standalone at all. KLEE reaches
+that operator through its API rather than through SMT-LIB, so it does not
+notice. It is a real hole in this method.
+
 ## What this does not establish
 
 **One run, one machine, no repetition.** There is no variance estimate here.
@@ -159,4 +201,11 @@ honest way to use them, but it does mean the two tables are answering slightly
 different questions over different sets.
 
 **Nothing here is about correctness.** No configuration disagreed with another
-about a query; this measures speed only.
+about a query, and on the 1,082 replayed queries STP and Bitwuzla agreed
+without exception; this measures speed only.
+
+**The replayed corpus is not the hard tail.** It was dumped from Z3-driven
+runs, so it carries Z3's query distribution, and only 15 of its 1,082 queries
+take Bitwuzla longer than 0.2s. The 69 queries that exhaust a 30-second cap
+inside KLEE are not in it. What the replay settles is the shape of the
+advantage over ordinary queries, not the behaviour of the extreme tail.

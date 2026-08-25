@@ -28,21 +28,35 @@ done
 
 printf 'query\tbytes\tstp_s\tstp_res\tbtw_s\tbtw_res\n' > "$OUT"
 
+# Normalise to one of sat / unsat / timeout / error. Taking the last line of
+# output as the answer is not safe: STP reports an unsupported operator as
+# `(error "syntax error ... token: fp.to_ieee_bv")` and exits in ten
+# milliseconds, which reads exactly like a very fast solve. 26 queries in the
+# first corpus were scored as instant STP wins that way.
+verdict() {
+  case "$1" in
+    ""|*"timeout"*) echo timeout ;;
+    sat) echo sat ;;
+    unsat) echo unsat ;;
+    *error*|*Error*|*ERROR*) echo error ;;
+    *) echo "other" ;;
+  esac
+}
+
 one() {
-  local f=$1 n bytes t0 t1 sres bres ssec bsec
+  local f=$1 n bytes t0 t1 sout bout ssec bsec
   n=$(basename "$f" .smt2)
   bytes=$(wc -c < "$f")
   t0=$(date +%s.%N)
-  sres=$(timeout "$TMO" "$STP" --SMTLIB2 "$f" 2>/dev/null | tail -1)
+  sout=$(timeout "$TMO" "$STP" --SMTLIB2 "$f" 2>&1 | tail -1)
   t1=$(date +%s.%N); ssec=$(echo "$t1 - $t0" | bc)
-  [ -z "$sres" ] && sres=timeout
   t0=$(date +%s.%N)
-  bres=$(timeout "$TMO" "$BTW" "$f" 2>/dev/null | tail -1)
+  bout=$(timeout "$TMO" "$BTW" "$f" 2>&1 | tail -1)
   t1=$(date +%s.%N); bsec=$(echo "$t1 - $t0" | bc)
-  [ -z "$bres" ] && bres=timeout
-  printf '%s\t%s\t%.3f\t%s\t%.3f\t%s\n' "$n" "$bytes" "$ssec" "$sres" "$bsec" "$bres"
+  printf '%s\t%s\t%.3f\t%s\t%.3f\t%s\n' \
+    "$n" "$bytes" "$ssec" "$(verdict "$sout")" "$bsec" "$(verdict "$bout")"
 }
-export -f one; export STP BTW TMO
+export -f one verdict; export STP BTW TMO
 
 find "$DIR" -name '*.smt2' | sort |
   xargs -P "$PAR" -I{} bash -c 'one "$@"' _ {} >> "$OUT"
