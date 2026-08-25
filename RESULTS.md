@@ -352,6 +352,40 @@ There is a concrete improvement in the way: teach STP's SMT-LIB2 printer and
 parser Z3's `fp.to_ieee_bv` spelling. It would make floating-point queries
 round-trip, which is what any cross-solver comparison on this corpus needs.
 
+## Why coverage saturates, and why it should not be the headline
+
+Coverage barely moves for any solver or setting -- 86.55% at a 30s query cap,
+87.50% with twice the exploration. That is not because the remaining lines are
+hard to reach. Taking the union of every configuration's tests, per driver:
+
+| best coverage any configuration reached | drivers |
+| --- | ---: |
+| 100% | 145 |
+| 90-99% | 18 |
+| 50-89% | 62 |
+| under 50% | 4 |
+
+145 of 229 are already complete, and the 83 that are not are mostly not
+*reachable*. Two mechanisms account for it, and neither is about the solver:
+
+**KLEE replaces the function under test.** It substitutes its own intrinsics
+for `sqrt` (102 drivers), `fabs` (70), `fabsf` (10), `sqrtf` (9), `__finite`
+(6) and `__isnanf` (1). Usually that is harmless -- the driver is testing
+something else that happens to call sqrt. For two drivers it is not:
+`openlibm/sqrtf` and `openlibm/__isnanf` have their *target* replaced, so they
+measure KLEE's intrinsic and never enter the library at all. sqrtf tops out at
+21% of its lines, and what is missing is the whole software implementation:
+subnormal handling, exponent unbiasing, the Newton iteration.
+
+**Inline assembly.** 47 drivers report module-level assembly that KLEE ignores.
+`openlibm/fma` reaches 4.8%, and the lines it never runs are `__fnstcw` and the
+mxcsr accessors -- reading and setting the x87 rounding mode, which is
+assembly by definition.
+
+So the ~13% residue is largely structural, and coverage cannot discriminate
+between solvers on it. **Solver time is the measurement that works here;
+coverage should be read as a sanity check that a driver ran, not as a score.**
+
 ## What this does not establish
 
 **One run, one machine, no repetition.** There is no variance estimate here.
