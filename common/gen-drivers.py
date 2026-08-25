@@ -146,6 +146,22 @@ SUNDIALS_TYPES = {
 }
 SUNDIALS_TYPES.update(ARRAY_TYPES)
 
+FFTW_TYPES = {
+    "double":       lambda n: sym_scalar("double", n),
+    "int":          lambda n: sym_scalar("int", n, bound="8"),
+    "unsigned int": lambda n: sym_scalar("unsigned int", n, bound="8"),
+    # FFTW's planner is told to estimate rather than measure: measuring runs
+    # timing experiments, which under symbolic execution is both meaningless
+    # and unbounded.
+    "unsigned":     lambda n: (["  unsigned %s = FFTW_ESTIMATE;" % n], n),
+    # fftw_complex is double[2], so an array of them is an array of doubles
+    # twice as long.
+    "fftw_complex *": lambda n: (["  fftw_complex %s[%d];" % (n, ARRAY_N),
+                                  '  klee_make_symbolic(%s, sizeof(%s), "%s");'
+                                  % (n, n, n)], n),
+}
+FFTW_TYPES.update(ARRAY_TYPES)
+
 BLIS_TYPES = {
     "double":       lambda n: sym_scalar("double", n),
     "float":        lambda n: sym_scalar("float", n),
@@ -173,6 +189,14 @@ LIBRARIES = {
         "prefixes": ("gsl_sf_", "gsl_cdf_", "gsl_ran_"),
         "types": GSL_TYPES,
         "includes": ["<gsl/gsl_sf.h>", "<gsl/gsl_cdf.h>", "<gsl/gsl_math.h>"],
+    },
+    "fftw": {
+        "header": "fftw3.h",
+        "internal": {},
+        "prefixes": ("fftw_",),
+        "types": FFTW_TYPES,
+        "pin": {"flags": "FFTW_ESTIMATE"},
+        "includes": ["<fftw3.h>"],
     },
     "blis": {
         "header": "blis.h",
@@ -221,7 +245,7 @@ def declarations(include_dir, cfg, extra_cflags):
                     if owned and owned in enums and node.get("name"):
                         enums[node["name"]] = enums[owned]
         elif kind == "FunctionDecl":
-            params = [p["type"]["qualType"]
+            params = [(p["type"]["qualType"], p.get("name", ""))
                       for p in node.get("inner", [])
                       if p.get("kind") == "ParmVarDecl"]
             fns.append((node.get("name", ""), node["type"]["qualType"], params))
@@ -245,11 +269,20 @@ def normalise(t):
 
 def build_driver(pub, ret, params, cfg, ctor):
     """Driver source, or (None, reason) if some parameter cannot be made symbolic."""
-    has_array = any(normalise(p) in ARRAY_TYPES for p in params)
+    has_array = any(normalise(p) in ARRAY_TYPES for p, _ in params)
 
     body, args = [], []
-    for i, ptype in enumerate(params):
+    for i, (ptype, pname) in enumerate(params):
         key = normalise(ptype)
+        # Some arguments are not values to explore but switches that have to
+        # hold a particular one. FFTW's planner flags are the case that
+        # matters: left to a bounded integer this lands on FFTW_EXHAUSTIVE,
+        # which makes the planner time every algorithm it knows.
+        pinned = cfg.get("pin", {}).get(pname)
+        if pinned is not None:
+            body.append("  %s a%d = %s;" % (key, i, pinned))
+            args.append("a%d" % i)
+            continue
         if key == "void":
             continue
         maker = cfg["types"].get(key)
@@ -310,7 +343,8 @@ def main():
     ctor = Constructor(decls, cfg["types"], enums,
                        lambda elem, name: sym_array(elem, name), ARRAY_N,
                        prefixes=cfg.get("prefixes", ())
-                                or tuple(cfg.get("internal", {})))
+                                or tuple(cfg.get("internal", {})),
+                       pins=cfg.get("pin", {}))
 
     # A header can declare the same function twice -- GMP does, for the ones it
     # also offers as __GMP_EXTERN_INLINE -- and writing the driver twice would

@@ -59,7 +59,7 @@ class Constructor:
     """Everything the generator knows about how to make values."""
 
     def __init__(self, decls, scalars, enums, array_maker, size_n,
-                 prefixes=()):
+                 prefixes=(), pins=None):
         self.scalars = scalars          # type -> maker(name) -> (lines, expr)
         self.enums = enums              # type -> [enumerator names]
         self.array_maker = array_maker  # (elem_type, name) -> (lines, expr)
@@ -69,6 +69,8 @@ class Constructor:
         # realloc() as a way to make a void and __ctype_get_mb_cur_max() as a
         # way to make a size_t -- both of which it did.
         self.prefixes = tuple(prefixes)
+        # Arguments pinned by name rather than explored -- see gen-drivers.
+        self.pins = pins or {}
 
         self.yielders = {}              # type -> [(fn, params, out_index|None)]
         self.accessors = {}             # type -> (fn, element type)
@@ -77,14 +79,16 @@ class Constructor:
     # -- indexing ---------------------------------------------------------
     def _index(self, decls):
         ctor = re.compile(r"(create|new|alloc|make|init|clone)", re.I)
-        for name, ret, params in decls:
+        for name, ret, params_named in decls:
+            params = [p for p, _ in params_named]
             if self.prefixes and not name.startswith(self.prefixes):
                 continue
             ret_n = normalise(ret).split("(")[0].strip()
 
             # Returns the thing.
             if ret_n and ret_n != "void" and ret_n not in self.scalars:
-                self.yielders.setdefault(ret_n, []).append((name, params, None))
+                    self.yielders.setdefault(ret_n, []).append(
+                    (name, params_named, None))
 
             # Writes the thing through an out-parameter. Only for something
             # named like a constructor: plenty of functions take a T* to read.
@@ -95,7 +99,7 @@ class Constructor:
                         base = normalise(pn[:-1])
                         if base and base not in self.scalars and "*" not in base:
                             self.yielders.setdefault(base, []).append(
-                                (name, params, i))
+                                (name, params_named, i))
 
             # Hands back the storage inside the thing, so its contents can be
             # made symbolic after it is built.
@@ -110,7 +114,7 @@ class Constructor:
         for t, ys in self.yielders.items():
             ys.sort(key=lambda y: (len(y[1]),
                                    0 if all(normalise(p) in self.scalars
-                                            for p in y[1]) else 1,
+                                            for p, _ in y[1]) else 1,
                                    len(y[0])))
 
     # -- building ---------------------------------------------------------
@@ -166,7 +170,12 @@ class Constructor:
 
     def _try(self, fn, params, out_i, key, name, depth, visiting):
         lines, args = [], []
-        for i, p in enumerate(params):
+        for i, (p, pname) in enumerate(params):
+            pin = self.pins.get(pname)
+            if pin is not None and i != out_i:
+                lines.append("  %s %s_%d = %s;" % (normalise(p), name, i, pin))
+                args.append("%s_%d" % (name, i))
+                continue
             if i == out_i:
                 args.append("&" + name)
                 continue
