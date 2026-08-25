@@ -390,6 +390,36 @@ So the ~13% residue is largely structural, and coverage cannot discriminate
 between solvers on it. **Solver time is the measurement that works here;
 coverage should be read as a sanity check that a driver ran, not as a score.**
 
+## Where to set the query cap, and where to stop
+
+The cap decides how long a doomed query burns before its state is discarded, so
+tightening it converts wasted solver time into exploration. Over the corpus:
+
+| cap | solver time | queries answered | timed out | wasted |
+| --- | ---: | ---: | ---: | ---: |
+| 30s | 7044s | 61,041 | 69 | **29.4%** |
+| **5s** | **5235s** | **98,545** | 124 | **11.8%** |
+
+More queries time out and less time is lost to them: 61% more answered in 26%
+less solver time.
+
+Tighter still keeps paying in exploration and stops paying in anything else.
+Over 37 budget-bound drivers, against the 5-second cap:
+
+| | 2s | 1s |
+| --- | ---: | ---: |
+| instructions | 1.546x | **2.389x** |
+| wasted solver time | 9.4% | 5.9% |
+| mean coverage | | **-0.12 points** |
+| drivers covering more / less / same | | 3 / 3 / 31 |
+| hard-killed runs | | 0 to 2 |
+
+**5 seconds is where to stop.** One second explores 2.4x as far and covers
+nothing more, with swings of -33 points on one driver and +30 on another and
+two runs that stop being able to finish at all. That is the coverage ceiling
+again: a suite already at 86% on lines that are mostly structural cannot reward
+more depth, so past a point the extra exploration is only variance.
+
 ## What this does not establish
 
 **One run, one machine, no repetition.** There is no variance estimate here.
