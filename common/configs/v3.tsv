@@ -1,0 +1,17 @@
+# The v3 CEGAR branches, measured through KLEE.
+#
+# codex-v3 only: it appends to ifaceflag_t, so a KLEE built against master's
+# headers can load it by LD_LIBRARY_PATH alone. claude-v3 still inserts
+# BV_TERM_ABSTRACTION_DIVMOD mid-enum, which shifts five of the flags KLEE
+# sets, so it cannot share a sweep with anything else and is measured
+# separately against a KLEE rebuilt on its headers.
+#
+# Abstraction is off in the first two rows because that is what KLEE's tuned
+# configuration uses; the -abs rows are what these branches exist to change.
+#
+# label <TAB> backend <TAB> LD_LIBRARY_PATH for libstp (or -) <TAB> extra klee args
+stp-master	stp	$STP_MASTER	--stp-sat-solver=minisat --stp-incremental-engage-at=8 --stp-adapt-incremental --use-forked-solver=false --stp-cnf-auto-threshold=0
+stp-codexv3	stp	$STP_CODEXV3	--stp-sat-solver=minisat --stp-incremental-engage-at=8 --stp-adapt-incremental --use-forked-solver=false --stp-cnf-auto-threshold=0
+stp-master-abs	stp	$STP_MASTER	--stp-sat-solver=minisat --stp-incremental-engage-at=8 --stp-adapt-incremental --use-forked-solver=false --stp-cnf-auto-threshold=0 --stp-bv-abstraction-width=53
+stp-codexv3-abs	stp	$STP_CODEXV3	--stp-sat-solver=minisat --stp-incremental-engage-at=8 --stp-adapt-incremental --use-forked-solver=false --stp-cnf-auto-threshold=0 --stp-bv-abstraction-width=53
+bitwuzla	bitwuzla	-	--bitwuzla-rewrite-level=1

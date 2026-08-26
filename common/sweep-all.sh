@@ -32,6 +32,11 @@ export STP_TERM=${STP_TERM:-/mnt/baranem/klee-float/deps/install-stp-term2/lib64
 # because it is a branch build until stp/stp#998 lands.
 export STP_CNF=${STP_CNF:-/mnt/baranem/klee-float/deps/install-stp-cnf/lib64}
 
+# The STP master build KLEE is linked against now, and the v3 CEGAR branch that
+# is ABI-compatible with it.
+export STP_MASTER=${STP_MASTER:-/mnt/baranem/klee-float/deps/install-stp-master/lib64}
+export STP_CODEXV3=${STP_CODEXV3:-/mnt/baranem/klee-float/deps/install-stp-cegar-codex-v3/lib64}
+
 # PAR and MAX_MEMORY together, not separately: this box keeps its working set
 # on a RAM disk, so the memory KLEE is allowed to take is memory the drivers
 # and bitcode are not holding.
