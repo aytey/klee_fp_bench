@@ -559,6 +559,59 @@ than their earlier selves, Bitwuzla by 17% and STP by 27%, which understated
 STP's own margin at 0.716 rather than flattering it. Nothing about the
 comparison is safe on a shared machine, in either direction.
 
+## What Bitwuzla was owed, and what it is worth
+
+Every STP figure above comes from a configuration chosen by measuring it.
+Bitwuzla's came from no options at all, and from a backend that called
+`bitwuzla_new` and `bitwuzla_delete` inside the per-query path -- so every
+query met a cold solver while STP kept a session across the whole run. That is
+not a knob Bitwuzla was set wrongly; it is a courtesy one solver had and the
+other did not.
+
+`--bitwuzla-incremental` gives Bitwuzla the same session, one instance with
+each query's assertions confined to a push/pop scope. Over 127 drivers where
+all four configurations explored *identically* and nothing was cut off:
+
+| | per-driver geomean | faster | slower | total solver |
+| --- | ---: | ---: | ---: | ---: |
+| `bwz-default` | — | — | — | 103.4s |
+| `bwz-noabs` | 1.061 | 63 | 32 | 128.9s |
+| **`bwz-incr`** | **0.760** | 74 | 23 | 147.8s |
+| `stp-thr0` | 0.711 | 78 | 22 | 82.9s |
+
+**The abstraction is not the knob.** Turning it off costs 6% overall and more
+on the floating-point-heavy libraries -- GSL 1.304, OpenLibm 1.179 -- which is
+the opposite of what its targeting `bvmul` and `bvudiv` suggested. Bitwuzla's
+own default was already right here.
+
+**The session is worth having, and it changes the answer.**
+
+| STP against | per-driver geomean | drivers |
+| --- | ---: | --- |
+| Bitwuzla as KLEE ships it | 0.711 | 79 faster, 23 slower |
+| **Bitwuzla with a session** | **0.936** | **50 faster, 48 slower** |
+
+Most of what was reported as STP deciding these queries faster was STP being
+handed an advantage the harness never gave Bitwuzla. Given the same one, the
+two solvers split the corpus almost exactly in half.
+
+**The two statistics disagree, and both are true.** Per driver the session wins
+(0.760); by total solver time it loses badly (147.8s against 103.4s), because
+it has a tail. p90 is 1.500 and the worst driver is 6.3x, with `mpf_get_d_2exp`
+at 3.3x, `gsl_cdf_rayleigh_P` at 2.8x and `mpf_get_d` at 2.6x; those three
+alone exceed the whole net regression, the rest of the corpus offsetting them.
+Read per driver, Bitwuzla-with-a-session is close to STP. Read by totals, STP
+is still well clear. Which matters depends on whether the typical query or the
+whole run is the thing being paid for.
+
+**And the comparison is still not symmetric.** A retained clause database is
+not always worth keeping -- which is exactly why STP has
+`--stp-incremental-engage-at` and `--stp-adapt-incremental`, both tuned here,
+and why its own incrementality is conditional rather than unconditional.
+Bitwuzla now has the naive version of what STP has the measured version of. An
+engage threshold or a periodic reset is the obvious next step, and until it
+exists the 0.936 above still flatters STP.
+
 ## What this does not establish
 
 **One run, one machine, no repetition.** There is no variance estimate here.
@@ -595,8 +648,10 @@ session across queries and pushes and pops around each -- incrementality that
 per-query path and never calls `bitwuzla_push`. Every query meets a cold
 solver. And of Bitwuzla's own options -- SAT backend, rewrite level,
 abstraction width and the preprocessing passes -- KLEE exposes exactly one,
-`--bitwuzla-abstraction`, which no measurement here has yet moved off its
-default.
+`--bitwuzla-abstraction`. Both of those are answered in "What Bitwuzla was owed"
+below -- the abstraction default turns out to be right, the missing session
+did not -- but the SAT backend, rewrite level and abstraction width remain
+unreachable from KLEE and unmeasured.
 
 **The replayed corpus is not the hard tail.** It was dumped from Z3-driven
 runs, so it carries Z3's query distribution, and only 15 of its 1,082 queries
