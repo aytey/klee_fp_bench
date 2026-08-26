@@ -776,6 +776,68 @@ that decides these queries is one both solvers implement and only one of them
 implements usefully. That, rather than any aggregate on this page, is where
 STP's remaining work is.
 
+### Taking atan2 apart
+
+Dumped out of KLEE and replayed against both solvers on identical files, with
+STP configured as KLEE configures it, `atan2`'s 89 queries divide cleanly:
+
+| | STP | Bitwuzla | ratio |
+| --- | ---: | ---: | ---: |
+| all 89 | 7.80s | 2.70s | 2.89 |
+| **41 with floating point** | **6.97s** | **1.86s** | **3.74** |
+| 48 pure bit-vector | 0.84s | 0.84s | **1.00** |
+
+The bit-vector half is at parity to two decimal places. Everything that
+separates these solvers is in the floating-point queries, and net of the ~9.5ms
+each process spends starting, that half is about 4.5x.
+
+Measured with STP's own defaults instead of KLEE's the same corpus reads 6.29x,
+because the standalone binary keeps the conservative 200k CNF threshold that
+this suite moved to 0 for KLEE. Quoting that would have overstated the gap by
+more than half.
+
+**Where the time goes.** One query, 2,664 bytes, two `fp.div` on doubles. Every
+AST phase before bit-blasting takes 0-1ms and leaves 642 nodes. That blasts to
+**159,606 AIG nodes**, and MiniSat spends **5.6 million propagations** over
+3,780 conflicts. CNF generation is no longer the bottleneck -- `auto` picks
+`very-low` and it is cheap -- so what is left is search over a circuit that
+should not be that large.
+
+It is that large because of how `fp.div` is lowered. SymFPU's
+`fixedPointDivide` widens both operands to about twice the significand and then
+issues **two** full-width operations on them:
+
+    ubv div(ex / ey);   // a ~107-bit BVDIV
+    ubv rem(ex % ey);   // and a ~107-bit BVMOD, on the same operands
+
+carrying the author's note that it is "not the best way of doing this but
+pretty universal". Only the low 54 bits of the quotient survive, and the
+remainder is used only to ask whether it is zero.
+
+**What the other solver does about it.** Stripped of the floating point, a
+107-bit `bvudiv` alone says it plainly:
+
+| 107-bit `bvudiv`, low bits constrained | |
+| --- | ---: |
+| Bitwuzla, abstraction on (its default) | **0.025s** |
+| Bitwuzla, `--abstraction=false` | 0.655s |
+| STP, tuned | 0.151s |
+| STP with `--bv-term-abstraction` at width 53 | 0.475s |
+
+Lazy abstraction of that one operation is worth **26x** to Bitwuzla. The same
+feature costs STP 3x.
+
+**And it is not a matter of choosing the width.** Sweeping
+`--bv-abstraction-width` across the 41 floating-point queries: off 8.69s, 53
+19.89s, 64 17.35s, 80 22.28s, 100 24.31s, 106 26.81s. Every setting is worse
+than not abstracting, and the *higher* the width the worse it gets -- so the
+configuration that abstracts only the wide divisions, and nothing else, is the
+worst of the six. That points at what refinement does with a division rather
+than at which terms are picked.
+
+`reproducers/` holds both queries. They are small and they are seconds to run,
+which is a better place to work than a 255-driver sweep.
+
 ## What this does not establish
 
 **One run, one machine, no repetition.** There is no variance estimate here.
