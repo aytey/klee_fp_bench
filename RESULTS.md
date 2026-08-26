@@ -700,6 +700,42 @@ recommend. The closest Bitwuzla can currently get is with a setting it cannot
 be trusted with; the best it can be trusted with leaves STP ahead by about a
 quarter.
 
+### The knobs neither solver had been tuned on
+
+Everything above moved one factor at a time and stopped when something worked.
+Of the nine settings KLEE exposes for STP the tuned configuration set four, and
+on Bitwuzla's side rewrite level 1 had beaten the default 2 without anyone
+asking about 0. 106 drivers, identically explored under all seven:
+
+| STP, against its tuned baseline | geomean | faster/slower | total | worst |
+| --- | ---: | :---: | ---: | ---: |
+| `stp-best` | — | — | 45.4s | — |
+| `+--stp-incremental-piece-rewriting` | 1.012 | 42 / 37 | 44.3s | 6.00 |
+| `+--stp-incremental-scoped-preprocessing` | 1.011 | 32 / 41 | 45.8s | 1.67 |
+| `+--stp-bv-abstraction-width=53` | 1.186 | 29 / 47 | 84.3s | 5.82 |
+| `+--stp-bv-abstraction-width=24` | 1.267 | 18 / 58 | 100.9s | 4.80 |
+
+**Nothing here improves STP, and the abstraction actively harms it** -- 19% at
+the binary64 significand and 27% at binary32, nearly doubling the bill. That is
+the outcome `STPSolver.cpp` predicted in the comment above the option: "GSL is
+almost entirely double, so this suite sits on the losing side of that split;
+measuring it is the point." It was, and it is. The two incremental
+simplification flags are coin flips, 42 against 37 and 32 against 41.
+
+So the configuration these results have used throughout **is** STP's best of
+what KLEE can reach. It was not under-tuned, which was the live possibility
+worth ruling out before comparing anything.
+
+**Bitwuzla's rewrite level has an interior optimum.** Level 0 is worse than 1
+by 5.5% -- 36 drivers faster against 48 slower, 60.5s against 51.1s -- having
+already established that the default 2 is worse than 1 by 7.5%. Cheap rewriting
+beats both full rewriting and none, which is a real minimum rather than a
+monotone trend, and worth more than either endpoint would have suggested.
+
+| both solvers at their best available | geomean | drivers |
+| --- | ---: | --- |
+| `stp-best` vs `bwz-rwl1` | 0.775 | 64 faster, 17 slower |
+
 ## What this does not establish
 
 **One run, one machine, no repetition.** There is no variance estimate here.
