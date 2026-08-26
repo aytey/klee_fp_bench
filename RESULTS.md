@@ -580,6 +580,24 @@ different questions over different sets.
 about a query, and on the 1,082 replayed queries STP and Bitwuzla agreed
 without exception; this measures speed only.
 
+**STP is tuned here and Bitwuzla is not.** Every STP figure comes from a
+configuration chosen by measurement on this corpus -- its SAT solver, when
+incrementality engages, whether that adapts, and now the CNF-effort threshold.
+Bitwuzla has run throughout with no options at all, which is to say at KLEE's
+defaults and its own. The comparison is therefore *tuned STP against Bitwuzla
+as KLEE ships it*, which is a fair description of what a KLEE user gets today
+and is **not** the same claim as one solver being faster than the other.
+
+Two asymmetries are worth naming because they are not small. KLEE holds one STP
+session across queries and pushes and pops around each -- incrementality that
+`--stp-incremental-engage-at` exists to tune and that was worth 8% -- while
+`BitwuzlaSolverImpl` calls `bitwuzla_new` and `bitwuzla_delete` inside the
+per-query path and never calls `bitwuzla_push`. Every query meets a cold
+solver. And of Bitwuzla's own options -- SAT backend, rewrite level,
+abstraction width and the preprocessing passes -- KLEE exposes exactly one,
+`--bitwuzla-abstraction`, which no measurement here has yet moved off its
+default.
+
 **The replayed corpus is not the hard tail.** It was dumped from Z3-driven
 runs, so it carries Z3's query distribution, and only 15 of its 1,082 queries
 take Bitwuzla longer than 0.2s. The 69 queries that exhaust a 30-second cap

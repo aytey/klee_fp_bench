@@ -1,0 +1,29 @@
+# Is there anything in Bitwuzla's own settings worth having on this corpus?
+#
+# Every STP number in RESULTS.md comes from a configuration picked by measuring
+# it -- SAT backend, when incrementality engages, whether that adapts, and the
+# CNF-effort threshold. Bitwuzla's come from no options at all. That makes the
+# published comparison "tuned STP against Bitwuzla as KLEE ships it", which is
+# a fair description of what a KLEE user gets and is not the same claim as one
+# solver being faster than the other.
+#
+# Two things are asked here.
+#
+# bwz-noabs moves the one knob KLEE already wires. The corpus is floating-point
+# heavy and the abstraction targets bvmul, bvudiv and bvurem -- where fp.mul
+# and fp.div land once blasted, and where STP was found weakest -- so it is the
+# setting most likely to matter, in either direction.
+#
+# bwz-incr closes the larger, structural gap. KLEE holds one STP session and
+# pushes and pops around each query; BitwuzlaSolverImpl called bitwuzla_new and
+# bitwuzla_delete inside the per-query path, so every query met a cold solver
+# and every learned clause was discarded. --bitwuzla-incremental keeps one
+# session, which is the same courtesy STP has had throughout.
+#
+# stp-thr0 rides along as the reference the rest are quoted against.
+#
+# label <TAB> backend <TAB> LD_LIBRARY_PATH for libstp (or -) <TAB> extra klee args
+bwz-default	bitwuzla	-	
+bwz-noabs	bitwuzla	-	--bitwuzla-abstraction=false
+bwz-incr	bitwuzla	-	--bitwuzla-incremental=true
+stp-thr0	stp	$STP_CNF	--stp-sat-solver=minisat --stp-incremental-engage-at=8 --stp-adapt-incremental --use-forked-solver=false --stp-cnf-auto-threshold=0
