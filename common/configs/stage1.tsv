@@ -1,0 +1,33 @@
+# Stage 1 of finding each solver's best single configuration: the knobs never
+# measured at all.
+#
+# Everything published so far moved one factor at a time from a fixed baseline,
+# and stopped as soon as something worked. That leaves holes, and the larger
+# set of them is STP's: of the nine settings KLEE exposes for it, the tuned
+# configuration sets four.
+#
+# --stp-bv-abstraction-width is the pointed one. It is STP's own version of the
+# abstraction whose Bitwuzla counterpart was measured here, its comment in
+# STPSolver.cpp says outright that "GSL is almost entirely double, so this
+# suite sits on the losing side of that split; measuring it is the point", and
+# it has been sitting at off throughout. 53 is the binary64 significand, 24 the
+# binary32 one.
+#
+# The two incremental-simplification flags exist because STP's per-level route
+# "hands the SAT solver a formula nobody has been over". Both default off and
+# neither has been measured against this corpus.
+#
+# On Bitwuzla's side the hole is narrower and just as obvious: rewrite level 1
+# beat the default 2 by 7.5%, and nobody asked whether 0 beats 1.
+#
+# One factor per row. Interactions are stage 2, deliberately -- a second
+# one-at-a-time pass cannot see them.
+#
+# label <TAB> backend <TAB> LD_LIBRARY_PATH for libstp (or -) <TAB> extra klee args
+stp-best	stp	$STP_CNF	--stp-sat-solver=minisat --stp-incremental-engage-at=8 --stp-adapt-incremental --use-forked-solver=false --stp-cnf-auto-threshold=0
+stp-piece	stp	$STP_CNF	--stp-sat-solver=minisat --stp-incremental-engage-at=8 --stp-adapt-incremental --use-forked-solver=false --stp-cnf-auto-threshold=0 --stp-incremental-piece-rewriting
+stp-scoped	stp	$STP_CNF	--stp-sat-solver=minisat --stp-incremental-engage-at=8 --stp-adapt-incremental --use-forked-solver=false --stp-cnf-auto-threshold=0 --stp-incremental-scoped-preprocessing
+stp-bvabs53	stp	$STP_CNF	--stp-sat-solver=minisat --stp-incremental-engage-at=8 --stp-adapt-incremental --use-forked-solver=false --stp-cnf-auto-threshold=0 --stp-bv-abstraction-width=53
+stp-bvabs24	stp	$STP_CNF	--stp-sat-solver=minisat --stp-incremental-engage-at=8 --stp-adapt-incremental --use-forked-solver=false --stp-cnf-auto-threshold=0 --stp-bv-abstraction-width=24
+bwz-rwl1	bitwuzla	-	--bitwuzla-rewrite-level=1
+bwz-rwl0	bitwuzla	-	--bitwuzla-rewrite-level=0
