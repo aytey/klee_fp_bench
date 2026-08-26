@@ -1,0 +1,26 @@
+# Bitwuzla's own settings, now that KLEE can reach them.
+#
+# Anchored on bwz-incr rather than bwz-default: the session is the fairer
+# Bitwuzla, so a knob is asked about on top of it rather than on top of a
+# handicap. One variable moves per row.
+#
+# The abstraction width is the row with a reason behind it. This corpus is
+# floating point; an fp.mul on doubles blasts to a 53-bit multiply, and
+# Bitwuzla abstracts at 33 by default, so every one of them is abstracted
+# already. Turning the abstraction off measured worse (1.061), which says the
+# line is on the right side of these terms -- bv17 and bv24 ask whether it
+# wants to be further down still, taking narrower terms with it.
+#
+# rwl1 is the cheap half of the rewriter. There is no level above the default,
+# so this row can only lose; it is here to say by how much rather than to win.
+#
+# The SAT backend is absent because it cannot be asked yet: this libbitwuzla
+# has only CaDiCaL compiled in, and kissat needs it rebuilt with -Dkissat=true
+# and KLEE relinked, which would move every other number on the same page.
+#
+# label <TAB> backend <TAB> LD_LIBRARY_PATH for libstp (or -) <TAB> extra klee args
+bwz-incr	bitwuzla	-	--bitwuzla-incremental=true
+bwz-incr-bv17	bitwuzla	-	--bitwuzla-incremental=true --bitwuzla-abstraction-bv-size=17
+bwz-incr-bv24	bitwuzla	-	--bitwuzla-incremental=true --bitwuzla-abstraction-bv-size=24
+bwz-incr-rwl1	bitwuzla	-	--bitwuzla-incremental=true --bitwuzla-rewrite-level=1
+stp-thr0	stp	$STP_CNF	--stp-sat-solver=minisat --stp-incremental-engage-at=8 --stp-adapt-incremental --use-forked-solver=false --stp-cnf-auto-threshold=0
