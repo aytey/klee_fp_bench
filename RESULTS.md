@@ -612,6 +612,56 @@ Bitwuzla now has the naive version of what STP has the measured version of. An
 engage threshold or a periodic reset is the obvious next step, and until it
 exists the 0.936 above still flatters STP.
 
+### Bitwuzla's own settings, once KLEE could reach them
+
+Anchored on `bwz-incr`, so each knob is asked about on top of the session
+rather than on top of a handicap. 127 drivers, identically explored under all
+five configurations:
+
+| | per-driver geomean | faster | slower | total solver |
+| --- | ---: | ---: | ---: | ---: |
+| `bwz-incr` | — | — | — | 152.1s |
+| `bwz-incr-bv17` | 0.996 | 41 | 34 | 153.1s |
+| `bwz-incr-bv24` | 1.009 | 37 | 39 | 153.8s |
+| **`bwz-incr-rwl1`** | **0.925** | 66 | 27 | 137.5s |
+| `stp-thr0` | 0.898 | 58 | 42 | 86.3s |
+
+**The abstraction width does nothing.** Both settings have a median of exactly
+1.000 and split the corpus like a coin. The reasoning that put them in the
+table -- this corpus is floating point, an `fp.mul` on doubles blasts to a
+53-bit multiply, the default line sits at 33 -- was sound and the prediction
+from it was simply wrong. Where Bitwuzla draws that line is not what decides
+these queries.
+
+**The rewriter is, and in the direction this table did not expect.** `rwl1` --
+cheap term rewrites, without the full pass and its preprocessing -- is worth
+7.5%, on 66 drivers against 27, and helps in six libraries of seven (GSL 0.800,
+GMP 0.866, BLIS 0.898, CXSparse 0.939, OpenLibm 0.950, FFTW 0.987; only
+SUNDIALS at 1.041 goes the other way). The row was put in the table with the
+note that it could only lose, there being no level above the default. It won.
+
+That is the same shape as the result this whole line of work started from. STP
+spends more time building a good CNF than it saves solving one, and dropping
+the effort is worth 19%; Bitwuzla spends more time rewriting than it saves, and
+dropping it is worth 7.5%. Both defaults are tuned for queries harder than the
+ones KLEE actually asks.
+
+### Where that leaves the comparison
+
+| STP against | per-driver geomean | drivers |
+| --- | ---: | --- |
+| Bitwuzla as KLEE shipped it | 0.711 | 79 faster, 23 slower |
+| with a session | 0.898-0.936 | 50-59 faster, 42-48 slower |
+| **with a session and a cheap rewriter** | **0.971** | **56 faster, 44 slower** |
+
+The middle row is quoted as a range on purpose: the same pair of
+configurations measured 0.936 in one sweep and 0.898 in the next, on comparable
+sets of the same size but different membership. Differences of that order are
+not results here, which is worth remembering before reading much into 0.971
+either. What survives is the shape: **tuned against tuned, on this corpus, the
+two solvers are level**, and the 0.682 first reported was mostly measuring a
+harness that gave one of them a session and the other nothing.
+
 ## What this does not establish
 
 **One run, one machine, no repetition.** There is no variance estimate here.
