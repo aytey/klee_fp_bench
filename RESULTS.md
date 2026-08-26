@@ -838,6 +838,60 @@ than at which terms are picked.
 `reproducers/` holds both queries. They are small and they are seconds to run,
 which is a better place to work than a 255-driver sweep.
 
+### Trying to close it, and a stale binary
+
+Two things were worth attempting: STP's refinement of an abstracted division,
+and SymFPU's lowering that produces the division in the first place.
+
+**The first was already done, and this suite had been measuring a binary that
+predated it.** The STP KLEE was linked against here was built from the CNF
+commit, 27 commits behind master, and what landed in between includes PR #989 --
+"Bound an abstracted division by its dividend and its divisor", "Refine an
+abstracted division by the divisor the candidate chose", "Refine an abstracted
+division by inequalities over its quotient". On the isolated wide division that
+changes the answer completely:
+
+| `reproducers/wide-bvudiv.smt2` | abstraction off | on |
+| --- | ---: | ---: |
+| the build measured above (pre-merge) | 0.231s | 0.670s |
+| **current master** | 0.165s | **0.016s** |
+| Bitwuzla | 0.655s | 0.025s |
+
+Abstraction goes from costing 2.9x to saving 10x, and at 0.016s **STP beats
+Bitwuzla on that query**. Every statement above about STP's abstraction not
+working was measured before that landed and should be read as being about the
+older binary.
+
+**It does not carry to the corpus, and that is the more useful result.** On the
+41 floating-point queries, on current master, abstraction is still a net loss --
+12.22s against 25.99s standalone, and inside KLEE 6.25s against 18.21s, the
+same either side of incrementality so it is not an interaction with that.
+
+It is a loss made of large wins and larger losses, which the totals hide:
+q00047 0.637s to 0.070s, q00050 0.604s to 0.078s, and q00011 0.215s to
+**3.002s**. It wins on 21 of 41 queries. The obvious response is the one the
+CNF effort already got, a policy that engages it only where it pays -- but
+there is no signal to build one on. Abstraction wins on 4 of the 10 most
+expensive queries and 5 of the 10 cheapest, so cost does not predict it, and an
+oracle that always chose correctly would reach **8.30s against Bitwuzla's
+1.86s**. Perfect selection is not enough; the gap is not in the choosing.
+
+**The second was tried and does not pay.** `BBDivMod` subtracts at full operand
+width when the loop invariant says the remainder cannot exceed the divisor, so
+where the divisor's top bits are zero -- exactly SymFPU's shape -- the subtract
+can be narrowed. Implemented on `aytey_20260826_narrow_divmod`, it shrinks the
+circuit by 22% on a division of that shape and 13% on a real query, and runs a
+query that is all construction three times faster. Over the 41 queries it is
+14% *slower*. On one query MiniSat goes from 3,780 conflicts to 1,159; on
+another from **18** to 5,733, a free query becoming the most expensive in the
+set. 165 tests pass and 400 randomised division queries agree with master.
+
+Which answers the SymFPU question without needing the patch. A lowering that
+emitted a smaller division would be another way of making the circuit smaller,
+and making the circuit smaller is measurably not what these queries want: 13%
+of it can go with the search getting harder. The remaining distance to a solver
+that abstracts the division is not a distance in circuit size.
+
 ## What this does not establish
 
 **One run, one machine, no repetition.** There is no variance estimate here.
