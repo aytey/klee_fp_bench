@@ -1,0 +1,17 @@
+# What should a KLEE user actually pass Bitwuzla?
+#
+# Two settings earned their place separately and have only ever been measured
+# together: the session (0.760 per driver, but a tail that makes its totals
+# worse) and the cheap rewriter (0.925, measured on top of the session). If the
+# rewriter's win survives without the session, it can be had without the tail,
+# and the recommendation is different.
+#
+# So: all four corners, one sweep, plus the tuned STP the rest is quoted
+# against.
+#
+# label <TAB> backend <TAB> LD_LIBRARY_PATH for libstp (or -) <TAB> extra klee args
+bwz-default	bitwuzla	-	
+bwz-rwl1	bitwuzla	-	--bitwuzla-rewrite-level=1
+bwz-incr	bitwuzla	-	--bitwuzla-incremental=true
+bwz-incr-rwl1	bitwuzla	-	--bitwuzla-incremental=true --bitwuzla-rewrite-level=1
+stp-thr0	stp	$STP_CNF	--stp-sat-solver=minisat --stp-incremental-engage-at=8 --stp-adapt-incremental --use-forked-solver=false --stp-cnf-auto-threshold=0
