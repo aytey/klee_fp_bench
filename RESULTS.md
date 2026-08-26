@@ -736,6 +736,46 @@ monotone trend, and worth more than either endpoint would have suggested.
 | --- | ---: | --- |
 | `stp-best` vs `bwz-rwl1` | 0.775 | 64 faster, 17 slower |
 
+### What is left of the gap is one mechanism, and it is division
+
+OpenLibm is the library where the two summary statistics disagree about who
+won: STP takes 24% less time on the typical driver and 59% more in total. One
+driver explains it. `atan2f` costs STP 2.48s against Bitwuzla's 0.96s, which is
+1.52s of a 1.20s net gap -- the rest of the library offsetting it. Removed,
+OpenLibm reads 0.706 in STP's favour.
+
+`atan2(y, x)` is `atan(y/x)`, and division is where this work started. The
+`atan2` driver is STP's worst case anywhere in the corpus: 12.2s against 1.7s.
+
+Bitwuzla's abstraction module replaces wide `bvmul`, `bvudiv` and `bvurem` with
+fresh variables and refines them by CEGAR, rather than blasting them. Turning
+it off says how much of the gap that is:
+
+| `atan2`, double | solver |
+| --- | ---: |
+| Bitwuzla, abstraction on (its default) | **0.862s** |
+| Bitwuzla, abstraction off | 9.418s |
+| STP, best configuration | 9.653s |
+
+**Without the abstraction Bitwuzla lands on top of STP** -- 9.418s against
+9.653s, a 2% difference where there had been an 11x one. `atan2f` repeats it at
+smaller scale: 1.341s against STP's 1.172s. Division-free drivers move the
+other way, `log1p` at 0.91 and `expf` at 0.60, so the abstraction is a trade
+rather than a free win, and that is why disabling it costs only 6% across the
+corpus while costing 991% here.
+
+So the residual difference between these two solvers, after both are tuned, is
+not spread across the corpus. It is lazy abstraction of wide multiplies and
+divides: Bitwuzla has one that works, and on the drivers where it fires it is
+worth an order of magnitude.
+
+STP has the same idea behind `--stp-bv-abstraction-width`, and measured above
+it costs 19% at the binary64 significand and 27% at binary32 -- on `atan2f`
+specifically, 2.448s against 2.482s, which is no change at all. The mechanism
+that decides these queries is one both solvers implement and only one of them
+implements usefully. That, rather than any aggregate on this page, is where
+STP's remaining work is.
+
 ## What this does not establish
 
 **One run, one machine, no repetition.** There is no variance estimate here.
