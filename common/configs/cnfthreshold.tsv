@@ -10,9 +10,9 @@
 # auto very-low everywhere, which is the other end of the same dial.
 #
 # label <TAB> backend <TAB> LD_LIBRARY_PATH for libstp (or -) <TAB> extra klee args
-stp-medium	stp	/mnt/baranem/klee-float/deps/install-stp-cnf/lib64	--stp-sat-solver=minisat --stp-incremental-engage-at=8 --stp-adapt-incremental --use-forked-solver=false --stp-cnf-effort=2
-stp-thr0	stp	/mnt/baranem/klee-float/deps/install-stp-cnf/lib64	--stp-sat-solver=minisat --stp-incremental-engage-at=8 --stp-adapt-incremental --use-forked-solver=false --stp-cnf-auto-threshold=0
-stp-thr10k	stp	/mnt/baranem/klee-float/deps/install-stp-cnf/lib64	--stp-sat-solver=minisat --stp-incremental-engage-at=8 --stp-adapt-incremental --use-forked-solver=false --stp-cnf-auto-threshold=10000
-stp-thr32k	stp	/mnt/baranem/klee-float/deps/install-stp-cnf/lib64	--stp-sat-solver=minisat --stp-incremental-engage-at=8 --stp-adapt-incremental --use-forked-solver=false --stp-cnf-auto-threshold=32000
-stp-thr100k	stp	/mnt/baranem/klee-float/deps/install-stp-cnf/lib64	--stp-sat-solver=minisat --stp-incremental-engage-at=8 --stp-adapt-incremental --use-forked-solver=false --stp-cnf-auto-threshold=100000
-stp-thr200k	stp	/mnt/baranem/klee-float/deps/install-stp-cnf/lib64	--stp-sat-solver=minisat --stp-incremental-engage-at=8 --stp-adapt-incremental --use-forked-solver=false --stp-cnf-auto-threshold=200000
+stp-medium	stp	$STP_CNF	--stp-sat-solver=minisat --stp-incremental-engage-at=8 --stp-adapt-incremental --use-forked-solver=false --stp-cnf-effort=2
+stp-thr0	stp	$STP_CNF	--stp-sat-solver=minisat --stp-incremental-engage-at=8 --stp-adapt-incremental --use-forked-solver=false --stp-cnf-auto-threshold=0
+stp-thr10k	stp	$STP_CNF	--stp-sat-solver=minisat --stp-incremental-engage-at=8 --stp-adapt-incremental --use-forked-solver=false --stp-cnf-auto-threshold=10000
+stp-thr32k	stp	$STP_CNF	--stp-sat-solver=minisat --stp-incremental-engage-at=8 --stp-adapt-incremental --use-forked-solver=false --stp-cnf-auto-threshold=32000
+stp-thr100k	stp	$STP_CNF	--stp-sat-solver=minisat --stp-incremental-engage-at=8 --stp-adapt-incremental --use-forked-solver=false --stp-cnf-auto-threshold=100000
+stp-thr200k	stp	$STP_CNF	--stp-sat-solver=minisat --stp-incremental-engage-at=8 --stp-adapt-incremental --use-forked-solver=false --stp-cnf-auto-threshold=200000

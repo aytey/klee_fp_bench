@@ -528,6 +528,37 @@ workload moves it.
 Not yet wired into `backends.tsv` -- the flag only exists in the PR #998 build,
 and the corpus baseline should not depend on an unmerged branch.
 
+### What threshold 0 is worth against Bitwuzla
+
+The corpus comparison that put STP at 0.773 against Bitwuzla was run with STP
+at its stock CNF effort. Re-running all three interleaved in one sweep -- so
+the comparison is like-for-like rather than a ratio between two sweeps:
+
+| | vs Bitwuzla | STP faster | slower | solver time |
+| --- | ---: | ---: | ---: | --- |
+| **stp-thr0** | **0.682** | 84 | 18 | 94.0s vs 127.8s |
+| stp-medium | 0.833 | 71 | 34 | 124.6s vs 127.8s |
+
+129 drivers comparable under all three. Threshold 0 wins in all seven
+libraries: GSL 0.510, GMP 0.526, BLIS 0.617, OpenLibm 0.634, CXSparse 0.834,
+SUNDIALS 0.917, FFTW 0.991. The tail is still there -- p90 is 1.333 and the
+worst driver is 10.5x -- so this is a distribution that STP wins on balance,
+not one it dominates.
+
+Two checks make the number readable rather than merely favourable. `thr0`
+against `medium` lands at 0.818 here, against 0.811 in the threshold sweep and
+0.816 in a third run: three independent measurements within 0.7%. And
+`stp-medium` against Bitwuzla reproduces the earlier baseline at 0.785 on the
+115 drivers the two sweeps share, against the 0.773 published from the earlier
+one.
+
+That second check only passed on the second attempt, and the first attempt is
+worth recording. The same sweep run while this repo's own solver was being
+compiled on the same machine put `stp-medium` at 0.841 -- both solvers slower
+than their earlier selves, Bitwuzla by 17% and STP by 27%, which understated
+STP's own margin at 0.716 rather than flattering it. Nothing about the
+comparison is safe on a shared machine, in either direction.
+
 ## What this does not establish
 
 **One run, one machine, no repetition.** There is no variance estimate here.

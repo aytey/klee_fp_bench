@@ -6,6 +6,6 @@
 # that do reach it gain, and whether anything loses.
 #
 # label <TAB> backend <TAB> LD_LIBRARY_PATH for libstp (or -) <TAB> extra klee args
-stp-stock	stp	/mnt/baranem/klee-float/deps/install-stp-term2/lib64	--stp-sat-solver=minisat --stp-incremental-engage-at=8 --stp-adapt-incremental --use-forked-solver=false
-stp-cnfauto	stp	/mnt/baranem/klee-float/deps/install-stp-cnf/lib64	--stp-sat-solver=minisat --stp-incremental-engage-at=8 --stp-adapt-incremental --use-forked-solver=false
+stp-stock	stp	$STP_TERM	--stp-sat-solver=minisat --stp-incremental-engage-at=8 --stp-adapt-incremental --use-forked-solver=false
+stp-cnfauto	stp	$STP_CNF	--stp-sat-solver=minisat --stp-incremental-engage-at=8 --stp-adapt-incremental --use-forked-solver=false
 bitwuzla	bitwuzla	-	

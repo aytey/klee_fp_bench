@@ -27,6 +27,11 @@ RUNS=${RUNS:-runs-all}
 # otherwise enforce --max-solver-time only between calls into the SAT solver.
 export STP_TERM=${STP_TERM:-/mnt/baranem/klee-float/deps/install-stp-term2/lib64}
 
+# Where the STP carrying the auto CNF-effort threshold lives -- the build the
+# cnfauto/cnfthreshold/vsbitwuzla tables measure. Separate from STP_TERM
+# because it is a branch build until stp/stp#998 lands.
+export STP_CNF=${STP_CNF:-/mnt/baranem/klee-float/deps/install-stp-cnf/lib64}
+
 # PAR and MAX_MEMORY together, not separately: this box keeps its working set
 # on a RAM disk, so the memory KLEE is allowed to take is memory the drivers
 # and bitcode are not holding.

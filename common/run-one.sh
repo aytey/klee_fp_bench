@@ -2,7 +2,7 @@
 #
 # Run one driver under one solver configuration, replay its tests, measure.
 #
-#   run-one.sh <gsl|gmp> <function> <config-label> [search]
+#   run-one.sh <library> <function> <config-label> [search]
 #
 # The configuration's actual solver arguments come from the environment, so a
 # sweep can vary them per job: SOLVER, EXTRA_ARGS, STP_LIB_DIR.

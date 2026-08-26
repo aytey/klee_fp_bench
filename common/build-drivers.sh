@@ -2,7 +2,7 @@
 #
 # Compile every generated driver, twice.
 #
-#   build-drivers.sh <gsl|gmp>
+#   build-drivers.sh <library>
 #
 #   obj/<fn>.bc   the driver linked against the whole library as bitcode and
 #                 then pruned to what main can reach. KLEE spends seconds and
@@ -14,7 +14,7 @@
 #
 set -euo pipefail
 
-LIB=${1:?usage: build-drivers.sh <gsl|gmp>}
+LIB=${1:?usage: build-drivers.sh <library>}
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT=$(cd "$HERE/.." && pwd)
 WORK=${FP_BENCH_WORK:-/mnt/baranem/fp_bench-work}

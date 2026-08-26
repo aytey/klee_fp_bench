@@ -2,7 +2,7 @@
 #
 # Fetch a library, build it twice, and generate its drivers.
 #
-#   build-lib.sh <gsl|gmp>
+#   build-lib.sh <library>
 #
 # Twice, because the two builds answer different questions:
 #
@@ -19,7 +19,7 @@
 #
 set -euo pipefail
 
-LIB=${1:?usage: build-lib.sh <gsl|gmp>}
+LIB=${1:?usage: build-lib.sh <library>}
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT=$(cd "$HERE/.." && pwd)
 WORK=${FP_BENCH_WORK:-/mnt/baranem/fp_bench-work}

@@ -3,8 +3,9 @@
 Does STP decide floating-point queries faster than Bitwuzla, on real numerical
 code rather than on kernels written to be hard?
 
-Two libraries, each driven the way the APSEC floating-point-solver paper drove
-GSL: one driver per API function, every argument symbolic, and the measurement
+Seven libraries, each driven the way the APSEC floating-point-solver paper
+drove GSL: one driver per API function, every argument symbolic, and the
+measurement
 is how much of that function KLEE's generated tests reach when replayed
 natively. There is no bug oracle and none is wanted — coverage under a fixed
 budget is the signal, because it is the thing a faster solver actually buys.
@@ -91,6 +92,87 @@ floating-point value — norms with their scaling tests, CDFs, the special
 functions. Both belong in a coverage suite; only the second is a solver
 benchmark, and `aggregate.py` reports queries per driver so the difference is
 visible rather than averaged away.
+
+## Reproducing this
+
+### What has to be on the machine first
+
+Nothing here builds a solver or a KLEE; all four are pointed at, and every path
+below is an environment variable with a default, so a machine laid out
+differently overrides rather than edits.
+
+| | variable | what it must be |
+| --- | --- | --- |
+| KLEE source | `KLEE_SRC` | the tree holding `klee_make_symbolic`'s header |
+| KLEE build | `KLEE_BUILD` | a built KLEE with STP, Bitwuzla and Z3 all enabled |
+| LLVM 16 | `LLVM_PREFIX` | the clang KLEE was built against, plus `llvm-cov`/`llvm-profdata` |
+| wllvm shims | `SHIM` | the `clang`/`ar`/`ranlib` wrappers that keep bitcode alongside objects |
+| a Python env | `PYENV` | holds `wllvm`; some libraries' configure needs it on `PATH` |
+| working area | `FP_BENCH_WORK` | where sources, both builds, drivers and runs land — tens of GB, and fastest on a RAM disk |
+| STP with the terminator | `STP_TERM` | the `lib64` of an STP whose MiniSat can be stopped mid-search |
+
+That last one is not optional for timing work. Without it `--max-solver-time`
+is only enforced between calls into the SAT solver, so a query that goes deep
+into MiniSat overruns the cap and the run stops being a measurement of the cap.
+
+The two SMT-level scripts additionally take `STP_BIN` and `BITWUZLA_BIN`,
+solver binaries rather than libraries.
+
+### The pipeline
+
+    common/build-lib.sh      <lib>        # fetch, build twice, generate drivers
+    common/build-drivers.sh  <lib>        # compile every driver, twice
+    common/sweep-all.sh      [configs.tsv]  # run the table over every library
+    common/aggregate.py      <lib>        # read one library's results
+
+`build-lib.sh` builds each library twice on purpose: once to LLVM bitcode
+through wllvm, which is what KLEE executes, and once natively with clang's
+source-based coverage instrumentation, which is what the generated tests are
+replayed against. `build-drivers.sh` likewise emits a `.bc` per driver for KLEE
+and a native binary for replay.
+
+A sweep is driven by a tab-separated table, one configuration per line:
+
+    label <TAB> backend <TAB> LD_LIBRARY_PATH for libstp (or -) <TAB> extra klee args
+
+`common/configs/` holds the ones these results came from — `backends.tsv` for
+the four solvers, and one per question asked since. Paths in a table go through
+`envsubst`, so write `$STP_TERM` rather than an absolute path.
+
+### The knobs that change what a number means
+
+    BUDGET=60           # seconds of exploration per driver
+    MAX_SOLVER_TIME=5   # per-query cap; see "Where to set the query cap" in RESULTS.md
+    PAR=12              # drivers in flight; with MAX_MEMORY, sized to the RAM disk
+    MAX_MEMORY=2000     # MB per KLEE
+    RUNS=runs-all       # subdirectory per sweep, so one does not overwrite another
+
+`PAR` and `MAX_MEMORY` are the values `sweep-all.sh` exports, and those are the
+ones a sweep runs under. The scripts below it carry their own, higher defaults
+for when they are invoked directly on one driver.
+
+**Nothing else may be running.** These are wall-clock measurements of one
+machine, and they are not robust to sharing it. A sweep run while this repo's
+own solver was being compiled read 27% slower for STP and 17% for Bitwuzla --
+enough to move the headline ratio from 0.785 to 0.841 and to disagree with the
+baseline it should have reproduced.
+
+**Sweeps run a strided subset, not the whole corpus.** `sweep-all.sh` carries a
+stride per library — 10 for GSL, 1 for FFTW and CXSparse — which takes 1,118
+drivers down to **255**. That is what every figure in `RESULTS.md` is measured
+over. The stride is per library rather than global because the libraries differ
+by an order of magnitude in size and a global one would make the corpus almost
+entirely GSL. Editing the `LIBS` table changes it; a stride of 1 everywhere is
+the whole corpus and roughly four times the wall clock.
+
+### Comparing solvers with KLEE out of the way
+
+Inside KLEE two solvers stop being asked the same questions the moment one of
+them times out a query the other answered — the state dies, the path goes
+unexplored, and every later query differs. `split-queries.py` and
+`replay-queries.sh` take a dumped corpus and run both solvers over identical
+files, which is the only comparison with nothing else in it. `RESULTS.md` reads
+both, and says where they disagree.
 
 ## Considered and not included
 
