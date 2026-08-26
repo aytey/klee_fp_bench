@@ -1,0 +1,7 @@
+(set-logic QF_BV)
+(declare-const x (_ BitVec 107))
+(declare-const y (_ BitVec 107))
+(assert (bvugt y (_ bv1 107)))
+(assert (bvugt x y))
+(assert (= ((_ extract 53 0) (bvudiv x y)) (_ bv12345678901 54)))
+(check-sat)
