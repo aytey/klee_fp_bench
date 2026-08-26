@@ -1,0 +1,11 @@
+# Does CNF_EFFORT_AUTO hold up across the corpus, or only on the drivers it was
+# found on?
+#
+# auto deviates from stock STP only when an AIG reaches 32k nodes; below that
+# the two are byte-identical. So this is asking two things: whether the drivers
+# that do reach it gain, and whether anything loses.
+#
+# label <TAB> backend <TAB> LD_LIBRARY_PATH for libstp (or -) <TAB> extra klee args
+stp-stock	stp	/mnt/baranem/klee-float/deps/install-stp-term2/lib64	--stp-sat-solver=minisat --stp-incremental-engage-at=8 --stp-adapt-incremental --use-forked-solver=false
+stp-cnfauto	stp	/mnt/baranem/klee-float/deps/install-stp-cnf/lib64	--stp-sat-solver=minisat --stp-incremental-engage-at=8 --stp-adapt-incremental --use-forked-solver=false
+bitwuzla	bitwuzla	-	

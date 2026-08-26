@@ -1,0 +1,18 @@
+# Where should STP's auto CNF-effort threshold sit for KLEE's workload?
+#
+# STP defaults it to 200k AIG nodes, chosen conservatively on a corpus of
+# one-shot SMT-LIB queries. KLEE's stream is different in two ways that both
+# matter: thousands of small queries with a tail of enormous ones, and an
+# incremental solver holding state across them. Neither is what the default was
+# measured against, so the number is worth deriving here rather than inherited.
+#
+# medium is the baseline -- what STP did before auto existed. threshold 0 makes
+# auto very-low everywhere, which is the other end of the same dial.
+#
+# label <TAB> backend <TAB> LD_LIBRARY_PATH for libstp (or -) <TAB> extra klee args
+stp-medium	stp	/mnt/baranem/klee-float/deps/install-stp-cnf/lib64	--stp-sat-solver=minisat --stp-incremental-engage-at=8 --stp-adapt-incremental --use-forked-solver=false --stp-cnf-effort=2
+stp-thr0	stp	/mnt/baranem/klee-float/deps/install-stp-cnf/lib64	--stp-sat-solver=minisat --stp-incremental-engage-at=8 --stp-adapt-incremental --use-forked-solver=false --stp-cnf-auto-threshold=0
+stp-thr10k	stp	/mnt/baranem/klee-float/deps/install-stp-cnf/lib64	--stp-sat-solver=minisat --stp-incremental-engage-at=8 --stp-adapt-incremental --use-forked-solver=false --stp-cnf-auto-threshold=10000
+stp-thr32k	stp	/mnt/baranem/klee-float/deps/install-stp-cnf/lib64	--stp-sat-solver=minisat --stp-incremental-engage-at=8 --stp-adapt-incremental --use-forked-solver=false --stp-cnf-auto-threshold=32000
+stp-thr100k	stp	/mnt/baranem/klee-float/deps/install-stp-cnf/lib64	--stp-sat-solver=minisat --stp-incremental-engage-at=8 --stp-adapt-incremental --use-forked-solver=false --stp-cnf-auto-threshold=100000
+stp-thr200k	stp	/mnt/baranem/klee-float/deps/install-stp-cnf/lib64	--stp-sat-solver=minisat --stp-incremental-engage-at=8 --stp-adapt-incremental --use-forked-solver=false --stp-cnf-auto-threshold=200000

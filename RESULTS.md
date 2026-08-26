@@ -474,6 +474,60 @@ either fixed level -- `very-low` loses to `medium` below about 28k AIG nodes,
 where most of KLEE's queries live. Testing an adaptive policy by pinning it to
 one of its outcomes tests something else.
 
+## Where STP's auto CNF threshold belongs for KLEE
+
+`CNF_EFFORT_AUTO` (STP PR #998) drops CNF generation to very low once the AIG
+is big enough that building a good CNF costs more than solving a worse one. It
+defaults the crossover to 200k AND-nodes, and deliberately conservatively: where
+the crossover falls is a property of the query stream, and a general-purpose
+solver cannot know its caller's. KLEE's stream is thousands of small queries
+with a tail of enormous ones, decided by an incremental solver holding state
+across them, which is not the distribution the default was measured against.
+
+Sweeping the threshold over the corpus -- 255 drivers, seven libraries, six
+settings each, 1,530 runs -- puts the crossover at the bottom of the range:
+
+| threshold | geomean vs medium | faster | slower | >10% slower | total solver |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| **0** | **0.811** | 77 | 28 | 22 | 106.5s |
+| 32k | 0.912 | 60 | 38 | 28 | 117.8s |
+| 10k | 0.957 | 58 | 45 | 32 | 113.7s |
+| 100k | 0.961 | 61 | 46 | 36 | 132.5s |
+| 200k (STP default) | 0.970 | 52 | 44 | 33 | 141.7s |
+
+over the 128 drivers where all six settings explored *identically* and nothing
+was cut off. That restriction matters: exploration diverged on about a third of
+the corpus, and on those drivers a faster configuration explores further and
+meets harder queries, so its raw solver total and timeout count go *up* for a
+reason that has nothing to do with the setting. Read whole-corpus timeout counts
+here and threshold 0 looks like a regression; it is an artefact.
+
+Only the threshold-0 row is far enough from the others to read confidently.
+The settings at and above 10k cluster around 0.95 without a clean monotone
+ordering, and 200k lands exactly where it should -- indistinguishable from
+leaving the effort at medium, which is what a threshold that rarely fires means.
+
+Per library, threshold 0 is the best or equal-best setting in six of seven:
+
+| gsl | blis | openlibm | cxsparse | fftw | sundials | gmp |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0.653 | 0.646 | 0.796 | 0.887 | 0.905 | 0.907 | 0.967 |
+
+The win is an average, not a floor. 22 of 128 drivers are more than 10% slower
+and the worst is 2.8x, with a p10/p90 spread of 0.449 to 1.333. What it buys is
+25% of KLEE's solver time.
+
+**A threshold of 0 is not the same as asking for very-low outright.** The effort
+stays `AUTO`, so `BVExactEncoder`'s `allowAuto=false` path still pins itself to
+medium; `--stp-cnf-effort=0` would drop that too and cost the incremental
+refinement its clause count. Only the threshold expresses "very low everywhere
+except where refinement needs better". This is the case for the knob existing:
+200k stays the right default for STP, and the caller that has measured its own
+workload moves it.
+
+Not yet wired into `backends.tsv` -- the flag only exists in the PR #998 build,
+and the corpus baseline should not depend on an unmerged branch.
+
 ## What this does not establish
 
 **One run, one machine, no repetition.** There is no variance estimate here.
