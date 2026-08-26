@@ -662,6 +662,44 @@ either. What survives is the shape: **tuned against tuned, on this corpus, the
 two solvers are level**, and the 0.682 first reported was mostly measuring a
 harness that gave one of them a session and the other nothing.
 
+### What to actually pass Bitwuzla
+
+The session and the rewriter had only ever been measured together. Apart, they
+say different things. All four corners, 127 drivers identically explored:
+
+| config | geomean | faster/slower | total | p90 | worst | >2x slower |
+| --- | ---: | :---: | ---: | ---: | ---: | ---: |
+| `bwz-default` | — | — | 115.8s | — | — | — |
+| **`--bitwuzla-rewrite-level=1`** | **0.897** | 65 / 31 | **95.4s** | 1.33 | **2.00** | **0** |
+| `--bitwuzla-incremental` | 0.766 | 74 / 30 | 170.9s | 1.50 | 5.38 | 9 |
+| both | 0.740 | 68 / 27 | 155.9s | 1.33 | 4.50 | 5 |
+
+**The rewriter is the recommendation, on its own.** It is the only row where
+the per-driver figure and the total agree -- 10% off the typical driver and 18%
+off the whole bill -- and the only one with no tail: the worst driver is 2.00x
+and nothing exceeds it. Six libraries of seven gain, FFTW alone losing at
+1.030. The win is also *larger* alone (0.897) than on top of the session
+(0.966); the two overlap, the session already recovering some of what the full
+rewriter was spending.
+
+**The session is a trade, and not one to take yet.** It is the best per-driver
+number here, and it makes the run cost more: 170.9s against 115.8s, with nine
+drivers more than twice as slow and a worst case of 5.38x. Under a time budget
+those are exactly the drivers that stop exploring, which is the outcome this
+suite exists to notice. A retained clause database is not always worth keeping
+-- STP has `--stp-incremental-engage-at` and `--stp-adapt-incremental` for that
+reason and both were tuned here. Bitwuzla has no equivalent yet.
+
+So, for KLEE today: **`--bitwuzla-rewrite-level=1`**, the abstraction left
+alone, and incrementality left off until it can be made conditional.
+
+Against that Bitwuzla, STP is at **0.758** (74 faster, 23 slower) -- further
+ahead than the 0.918 it manages against a Bitwuzla with the session, because
+the session is the part that closes the gap and the part not yet safe to
+recommend. The closest Bitwuzla can currently get is with a setting it cannot
+be trusted with; the best it can be trusted with leaves STP ahead by about a
+quarter.
+
 ## What this does not establish
 
 **One run, one machine, no repetition.** There is no variance estimate here.
