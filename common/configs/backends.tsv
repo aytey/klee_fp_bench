@@ -8,7 +8,20 @@
 # forking a process per query. It needs an STP built against a MiniSat carrying
 # the terminator hook, or --max-solver-time is only enforced between calls into
 # the SAT solver.
-stp-tuned	stp	$STP_TERM	--stp-sat-solver=minisat --stp-incremental-engage-at=8 --stp-adapt-incremental --use-forked-solver=false
+stp-tuned	stp	$STP_TERM	--stp-sat-solver=minisat --stp-incremental-engage-at=8 --stp-adapt-incremental --use-forked-solver=false --stp-cnf-auto-threshold=0
 stp-shipped	stp	$STP_TERM	--stp-sat-solver=minisat
-bitwuzla	bitwuzla	-	
+bitwuzla	bitwuzla	-	--bitwuzla-rewrite-level=1
 z3	z3	-	
+
+# Two settings here were established by this suite rather than inherited.
+#
+# --stp-cnf-auto-threshold=0 makes STP's auto CNF effort pick very-low
+# everywhere. Worth 19% of solver time on this corpus; see "Where STP's auto
+# CNF threshold belongs for KLEE" in RESULTS.md. It needs an STP carrying
+# stp/stp#998, which is in master.
+#
+# --bitwuzla-rewrite-level=1 is cheap term rewriting without the full pass.
+# Worth 10% per driver and 18% of the whole bill, with no tail; both the
+# default (2) and none (0) are worse. See "What to actually pass Bitwuzla".
+# Bitwuzla's session (--bitwuzla-incremental) is deliberately NOT here: it is
+# faster per driver and worse in total, on a tail of 9 drivers past 2x.

@@ -118,6 +118,49 @@ into MiniSat overruns the cap and the run stops being a measurement of the cap.
 The two SMT-level scripts additionally take `STP_BIN` and `BITWUZLA_BIN`,
 solver binaries rather than libraries.
 
+### Starting from a new STP
+
+Nothing here builds a solver, but STP is the one whose build has to be right or
+the numbers quietly stop meaning anything. `common/build-stp.sh` captures the
+recipe:
+
+    RELINK_KLEE=1 common/build-stp.sh upstream/master master-now
+
+That checks out the ref into a worktree, configures, installs to
+`$DEPS/install-stp-<name>`, and reconfigures and rebuilds KLEE against it.
+Two of its options are load-bearing:
+
+* **`-DUSE_MINISAT=ON`**, which defaults *off*. Without it MiniSat is not built,
+  so `--stp-sat-solver=minisat` -- which every tuned configuration here uses --
+  is silently not what runs. It also brings the terminator, and without that
+  `--max-solver-time` is enforced only *between* calls into the SAT solver, so
+  a query that goes deep overruns the cap and the run stops being a measurement
+  of the cap. The script **refuses to install** an STP whose configure log does
+  not say `MiniSat can be stopped mid-search`.
+* **`-DENABLE_PYTHON_INTERFACE=OFF`**, because the install step otherwise tries
+  to write into the system site-packages, fails, and aborts *before* the CMake
+  package config is written -- which is exactly the file `-DSTP_DIR` needs.
+
+Then point the sweep at it, or the runs will load a different `libstp` than the
+one KLEE was compiled against:
+
+    export STP_TERM=$DEPS/install-stp-master-now/lib64
+
+**Two ABI cautions, both of which have bitten this suite.** KLEE compiles the
+integer values of `ifaceflag_t` into its binary, so a `libstp` that inserted a
+flag mid-enum makes KLEE set a *different* flag than it names, silently and
+without error -- one branch's `--stp-cnf-auto-threshold=0` was setting
+`INCREMENTAL_PIECE_REWRITING`. Loading a library by `LD_LIBRARY_PATH` is only
+safe when its enum matches the headers KLEE was built against; otherwise
+rebuild KLEE against those headers. And a library that is merely *older* than
+KLEE's headers can lack a flag entirely, which fails at compile time and is the
+kinder case.
+
+**The tuned settings live in `common/configs/backends.tsv`,** and two of them
+were established here rather than inherited: `--stp-cnf-auto-threshold=0`
+(needs stp/stp#998, in master) and `--bitwuzla-rewrite-level=1`. Re-running
+against a new STP without them measures the untuned solvers.
+
 ### The pipeline
 
     common/build-lib.sh      <lib>        # fetch, build twice, generate drivers

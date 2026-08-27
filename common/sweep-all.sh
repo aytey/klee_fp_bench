@@ -25,7 +25,10 @@ RUNS=${RUNS:-runs-all}
 # Where an STP carrying the MiniSat terminator lives. KLEE is linked against it
 # now, so this is belt and braces; a KLEE built against the other one would
 # otherwise enforce --max-solver-time only between calls into the SAT solver.
-export STP_TERM=${STP_TERM:-/mnt/baranem/klee-float/deps/install-stp-term2/lib64}
+# Any STP built by common/build-stp.sh qualifies: that script refuses to
+# install one whose MiniSat cannot be stopped mid-search. Repoint this at a
+# newer build rather than editing the tables.
+export STP_TERM=${STP_TERM:-/mnt/baranem/klee-float/deps/install-stp-master-now/lib64}
 
 # Where the STP carrying the auto CNF-effort threshold lives -- the build the
 # cnfauto/cnfthreshold/vsbitwuzla tables measure. Separate from STP_TERM
