@@ -892,6 +892,26 @@ and making the circuit smaller is measurably not what these queries want: 13%
 of it can go with the search getting harder. The remaining distance to a solver
 that abstracts the division is not a distance in circuit size.
 
+### A correction: the abstraction width used above was badly chosen
+
+Every measurement on this page that enables STP's bit-vector abstraction passes
+`--stp-bv-abstraction-width=53`, on the reasoning that a binary64 significand is
+53 bits. STP's own default is 64, and 64 is the better setting here. The
+stage-1 sweep above had already hinted at it -- 64 read 17.35s against 53's
+19.89s -- and it was not followed up.
+
+At width 64 on a 298-query floating-point corpus drawn from eleven drivers,
+abstraction costs about 9% against leaving it off (40.0s against 36.6s) rather
+than the 19-27% the width-53 rows report. The direction of every conclusion
+above survives: abstraction still loses on this workload, STP's own version
+still does not pay, and the mechanism is still what separates the two solvers
+on division. The magnitudes on the width-53 rows are overstated.
+
+What surfaced it is worth recording too. A later STP branch documented its own
+measurements, in a header comment, against this very corpus. Its figures for
+one profile would not reproduce here -- and the reason was that this suite had
+been holding the width at 53 while the branch measured at 64.
+
 ## What this does not establish
 
 **One run, one machine, no repetition.** There is no variance estimate here.
