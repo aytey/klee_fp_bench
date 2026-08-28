@@ -25,7 +25,9 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WORK = os.environ.get("FP_BENCH_WORK", "/mnt/baranem/fp_bench-work")
-DEFAULT = "gsl openlibm blis sundials gmp fftw cxsparse".split()
+DEFAULT = ("gsl openlibm blis sundials sundials-f128 sundials-f16 gmp fftw cxsparse "
+           "fftwq cuba f2clapack f2clapack-f64 f2clapack-f32 f2clapack-f16 "
+           "cmsisdsp cmsisdsp-f32 hdf5 hdf5-f32").split()
 
 _spec = importlib.util.spec_from_file_location("agg", os.path.join(HERE, "aggregate.py"))
 agg = importlib.util.module_from_spec(_spec)

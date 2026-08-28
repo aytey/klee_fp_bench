@@ -219,6 +219,28 @@ FFTW_TYPES = {
 }
 FFTW_TYPES.update(ARRAY_TYPES)
 
+# --------------------------------------------------------------------------
+# FFTW at binary128: the same library through its fftwq_* API, with R =
+# __float128. This map is the binary64 one with the element type changed, and
+# that is the point -- the two arms differ in the format and in nothing else,
+# so a difference between them is a difference the solver made.
+# --------------------------------------------------------------------------
+FFTWQ_TYPES = {
+    "__float128":   lambda n: sym_scalar("__float128", n),
+    # FFTW's cost model stays binary64 at every precision: fftwq_flops writes
+    # through a double *, and fftwq_set_timelimit takes a double.
+    "double":       lambda n: sym_scalar("double", n),
+    "int":          lambda n: sym_scalar("int", n, bound="8"),
+    "unsigned int": lambda n: sym_scalar("unsigned int", n, bound="8"),
+    "unsigned":     lambda n: (["  unsigned %s = FFTW_ESTIMATE;" % n], n),
+    "__float128 *": lambda n: sym_array("__float128", n),
+    # fftwq_complex is __float128[2], the shape fftw_complex has at binary64.
+    "fftwq_complex *": lambda n: (["  fftwq_complex %s[%d];" % (n, ARRAY_N),
+                                   '  klee_make_symbolic(%s, sizeof(%s), "%s");'
+                                   % (n, n, n)], n),
+}
+FFTWQ_TYPES.update(ARRAY_TYPES)
+
 # The order of a BLIS matrix. Small, for the reason ARRAY_N is small.
 BLIS_N = 4
 
@@ -421,6 +443,338 @@ CXSPARSE_TYPES = {
     "int32_t *": lambda n: sym_array("int32_t", n, CS_N),
 }
 
+# --------------------------------------------------------------------------
+# CMSIS-DSP, at two widths.
+#
+# CMSIS-DSP writes the same kernel once per element type -- arm_add_f16,
+# arm_add_f32 and arm_add_f64 are one algorithm written three times by the
+# library's own authors -- so one type map with the element swapped gives a
+# matched *pair* of corpora rather than two different benchmarks. That is what
+# makes the binary16 arm measurable: the f32 twin is the control, and the
+# format is the only thing that differs between them. 23 of the 30 branching
+# drivers issue an identical query count at both widths.
+#
+# float16_t is _Float16 here rather than __fp16. They are the same format, but
+# on x86-64 __fp16 is a storage type clang refuses as a parameter or a return
+# type at all -- which 24 parameters and 17 return types of this API are.
+# build-lib.sh redirects the typedef; see there.
+# --------------------------------------------------------------------------
+F16_N = 8
+# The order of a CMSIS-DSP matrix, small for the reason ARRAY_N is small.
+MAT_N = 4
+
+
+def cmsis_matrix(suffix):
+    """A dense MAT_N x MAT_N matrix, symbolic in every entry.
+
+    arm_mat_init_* takes the dimensions and the buffer separately, so the
+    buffer's length is a relationship between arguments -- the one class of
+    precondition this generator says up front that it cannot meet. Square, so
+    that every matrix a driver builds conforms with every other.
+    """
+    elem = {"f16": "float16_t", "f32": "float32_t"}[suffix]
+
+    def make(name):
+        return (["  %s %s_d[%d * %d];" % (elem, name, MAT_N, MAT_N),
+                 '  klee_make_symbolic(%s_d, sizeof(%s_d), "%s_d");'
+                 % (name, name, name),
+                 "  arm_matrix_instance_%s %s;" % (suffix, name),
+                 "  arm_mat_init_%s(&%s, %d, %d, %s_d);"
+                 % (suffix, name, MAT_N, MAT_N, name)],
+                "&" + name)
+    return make
+
+
+def _cmsis_types(elem):
+    """The type map for one CMSIS-DSP precision."""
+    return {
+        elem:         lambda n: sym_scalar(elem, n),
+        elem + " *":  lambda n: sym_array(elem, n, F16_N),
+        "q15_t *":    lambda n: sym_array("q15_t", n, F16_N),
+        "uint32_t *": lambda n: sym_array("uint32_t", n, F16_N),
+        "int32_t *":  lambda n: sym_array("int32_t", n, F16_N),
+        # CMSIS-DSP spells its lengths uint32_t, which build_driver's has_array
+        # rule does not cover, so they are bounded here instead.
+        "uint32_t":   lambda n: sym_scalar("uint32_t", n, bound=str(F16_N)),
+        "uint16_t":   lambda n: sym_scalar("uint16_t", n, bound=str(F16_N)),
+        "uint8_t":    lambda n: sym_scalar("uint8_t", n, bound="2"),
+        "int32_t":    lambda n: sym_scalar("int32_t", n, bound=str(F16_N)),
+        "int":        lambda n: sym_scalar("int", n, bound=str(F16_N)),
+    }
+
+
+CMSISDSP_TYPES = dict(_cmsis_types("float16_t"))
+CMSISDSP_TYPES.update({
+    "float32_t *": lambda n: sym_array("float32_t", n, F16_N),
+    "float64_t *": lambda n: sym_array("float64_t", n, F16_N),
+    "arm_matrix_instance_f16 *": cmsis_matrix("f16"),
+})
+
+CMSISDSP32_TYPES = dict(_cmsis_types("float32_t"))
+CMSISDSP32_TYPES.update({
+    "float16_t *": lambda n: sym_array("float16_t", n, F16_N),
+    "float64_t *": lambda n: sym_array("float64_t", n, F16_N),
+    "arm_matrix_instance_f32 *": cmsis_matrix("f32"),
+})
+
+# A length of zero underflows: arm_max_f16 computes blockSize - 1U and walks
+# off the buffer. That is a precondition of the API rather than a bug, and
+# nothing in the type says it.
+CMSIS_MIN = {"blockSize": "1", "numRows": "1", "numCols": "1",
+             "numSamples": "1", "nbVectors": "1", "vecDim": "1"}
+
+# What is left out, and why: the _init_ functions are how the constructor
+# search builds an arm_cfft_instance_f16 or an arm_fir_instance_f16 and are not
+# drivers of their own; typecast is a bit reinterpretation and bitreversal is
+# integer index arithmetic.
+#
+# arm_cfft_radix2_* goes for a different reason: CMSIS-DSP declares it in the
+# header and compiles it into neither build -- arm_cfft_radix2_init_f16 and
+# _f32 are both absent from the bitcode and from the coverage archive, so the
+# driver links against nothing. It is the deprecated CFFT interface, and the
+# radix-4 one beside it is present and is kept.
+CMSIS_EXCLUDE = r"(_init_|_init_f(16|32)$|typecast|bitreversal|cfft_radix2)"
+
+# --------------------------------------------------------------------------
+# Cuba, at binary128.
+#
+# Cuba's REALSIZE=16 configuration makes its `cubareal` a __float128 and maps
+# its mathematics onto libquadmath. Unlike FFTW's quad arm it *branches* on
+# quad values -- Cuhre's adaptive convergence test is a quad fp.div with a
+# symbolic denominator -- which is what makes it the binary128 solver load
+# rather than a binary128 coverage row.
+# --------------------------------------------------------------------------
+CUBA_TYPES = {
+    "cubareal":      lambda n: sym_scalar("cubareal", n),
+    "cubareal *":    lambda n: sym_array("cubareal", n),
+    "int":           lambda n: sym_scalar("int", n, bound="4"),
+    "int *":         lambda n: sym_array("int", n),
+}
+
+# The integrand is a callback rather than a value, so the generator cannot make
+# one symbolic: it has to be written. This is the smallest one that puts a
+# symbolic quad *inside* the integration -- smooth in x, linear in a symbolic
+# coefficient -- so the adaptive algorithms subdivide on a value the solver
+# chose rather than on a constant.
+CUBA_PREAMBLE = [
+    "static cubareal fpb_coeff;",
+    "",
+    "static int fpb_integrand(const int *ndim, const cubareal x[],",
+    "                         const int *ncomp, cubareal f[], void *userdata) {",
+    "  (void)ndim; (void)ncomp; (void)userdata;",
+    "  f[0] = fpb_coeff * x[0] * x[0];",
+    "  return 0;",
+    "}",
+    "",
+]
+CUBA_PROLOGUE = [
+    '  klee_make_symbolic(&fpb_coeff, sizeof(fpb_coeff), "coeff");',
+]
+
+# Callbacks, state files and the counters that decide how long the integration
+# runs. epsrel and epsabs are deliberately *not* here: they are cubareal, they
+# are what the convergence test divides by, and leaving them symbolic is the
+# whole reason this library is in the corpus. maxeval bounds the run instead.
+CUBA_PINS = {
+    "integrand": "fpb_integrand", "userdata": "NULL", "spin": "NULL",
+    "statefile": "NULL", "peakfinder": "NULL", "xgiven": "NULL",
+    # ndim is 2 rather than 1 because Cuhre is a cubature rule and has none
+    # for one dimension: at ndim=1 it returns immediately, and the driver runs
+    # 225 instructions without entering the integration at all. Two is the
+    # smallest that works for all four algorithms.
+    "ndim": "2", "ncomp": "1", "nvec": "1", "flags": "0", "seed": "0",
+    "mineval": "0", "maxeval": "1000",
+    "nstart": "50", "nincrease": "50", "nbatch": "50", "gridno": "0",
+    "key": "0", "key1": "0", "key2": "0", "key3": "0",
+    "maxpass": "1", "nnew": "50", "nmin": "2",
+    "border": "0.", "maxchisq": "10.", "mindeviation": ".25",
+    "ngiven": "0", "ldxgiven": "0", "nextra": "0",
+}
+
+# --------------------------------------------------------------------------
+# HDF5's datatype conversions.
+#
+# HDF5 has no _Float16 in any installed header -- all 34 of its half-precision
+# conversion functions are private -- but every one of them is reachable
+# through a single public entry point, H5Tconvert(src, dst, nelmts, buf,
+# background, plist), whose types are named by hid_t handles rather than by C
+# types. An hid_t is an opaque integer whose value must name a registered
+# datatype, which the constructor search cannot fabricate, so these drivers are
+# written from a table rather than read from a header. That is CXSparse's
+# split -- structure by hand, values symbolic -- applied to a datatype instead
+# of to a sparse matrix.
+#
+# What makes it worth the hand-writing is format purity: the queries are
+# binary16 and nothing else. No accumulator, no libm, no wider intermediate
+# anywhere on the path -- 1,742 binary16 terms and zero of any other sort. For
+# a comparison *across* formats that is worth more than the driver count says.
+# --------------------------------------------------------------------------
+H5_NELMTS = 4
+
+#: tag -> (C type, HDF5 native datatype). The tag is also what HDF5 spells into
+#: the conversion function's own name, which is what functions.tsv needs.
+H5_TYPES = {
+    "_Float16": ("_Float16", "H5T_NATIVE_FLOAT16"),
+    "float":    ("float", "H5T_NATIVE_FLOAT"),
+    "double":   ("double", "H5T_NATIVE_DOUBLE"),
+    "schar":    ("signed char", "H5T_NATIVE_SCHAR"),
+    "uchar":    ("unsigned char", "H5T_NATIVE_UCHAR"),
+    "short":    ("short", "H5T_NATIVE_SHORT"),
+    "ushort":   ("unsigned short", "H5T_NATIVE_USHORT"),
+    "int":      ("int", "H5T_NATIVE_INT"),
+}
+
+#: The conversions worth driving, with "F" standing for the format this arm is
+#: about. The narrow integer destinations are the ones that keep their range
+#: checks -- H5T_CONV_Fx_CORE's `*(S) > (ST)(D_MAX)` per element, which is
+#: where the comparisons come from. Into int, binary16's whole range fits, the
+#: checks fold away and the conversion is a bare fptosi; that pair is here as
+#: the contrast rather than left out.
+H5_PAIRS = [("F", "schar"), ("F", "uchar"), ("F", "short"), ("F", "ushort"),
+            ("F", "int"), ("F", "double"),
+            ("schar", "F"), ("uchar", "F"), ("short", "F"), ("ushort", "F"),
+            ("double", "F")]
+
+
+def h5_drivers(cfg):
+    """One driver per conversion in H5_PAIRS, at this arm's format."""
+    out = []
+    for src, dst in H5_PAIRS:
+        src = cfg["focus"] if src == "F" else src
+        dst = cfg["focus"] if dst == "F" else dst
+        if src == dst:
+            continue
+        sctype, snative = H5_TYPES[src]
+        dctype, dnative = H5_TYPES[dst]
+        body = [
+            "int main(void) {",
+            "  /* H5Tconvert converts in place, so the buffer has to be wide",
+            "     enough for whichever of the two types is larger. */",
+            "  union { %s s[%d]; %s d[%d]; } b;"
+            % (sctype, H5_NELMTS, dctype, H5_NELMTS),
+            '  klee_make_symbolic(&b, sizeof(b), "src");',
+            # volatile, and not klee_warning: the drivers are replayed
+            # natively against libkleeRuntest, which has klee_make_symbolic and
+            # klee_assume but no klee_warning, so a driver that calls it
+            # compiles and then fails to link.
+            "  volatile herr_t r_ = H5Tconvert(%s, %s, %d, &b, NULL, H5P_DEFAULT);"
+            % (snative, dnative, H5_NELMTS),
+            "  return 0;",
+            "}",
+            "",
+        ]
+        out.append(("H5Tconvert_%s_%s" % (src.lstrip("_"), dst.lstrip("_")),
+                    _source(cfg, body),
+                    "H5T__conv_%s_%s" % (src, dst)))
+    return out
+
+
+# --------------------------------------------------------------------------
+# f2cblaslapack, at binary128 and binary64.
+#
+# PETSc's f2c translation of BLAS and LAPACK, which ships a quadruple-precision
+# set alongside the usual four. It is the binary128 library that *branches*:
+# 5,396 `fcmp fp128` and 2,046 `fdiv fp128` against FFTW's 0 and 10, because
+# partial pivoting is a magnitude comparison over the matrix in a loop --
+# iqamax's `if (abs(dx[i]) > dmax)`, which qgetf2 calls once per column.
+#
+# It is also CXSparse's split, for CXSparse's reason. A BLAS call's integer
+# arguments are the shape of the matrix -- lda is the distance between columns,
+# and a symbolic one is concretised at the first subscript and spends the run
+# on integers. So the shape is written and only the values are symbolic, and
+# what is not measured is anything that depends on the shape.
+#
+# The roles below are a fact about LAPACK rather than about C, which is why
+# they live here and not in the constructor search -- the same argument
+# BLIS_ROLES makes. LAPACK names its arguments by role across all 3,851 of
+# them, by a documented convention nobody deviates from.
+# --------------------------------------------------------------------------
+
+# The order of a matrix, small for the reason ARRAY_N is small.
+F2C_N = 4
+
+#: Integer arguments that are a dimension, and take the matrix order.
+F2C_DIMS = {"m", "n", "k", "nrhs", "lda", "ldb", "ldc", "ldz", "ldu", "ldv",
+            "ldvt", "ldq", "ldt", "ldx", "ldy", "ldab", "ldwork", "ihi", "kd"}
+#: ...a stride or a starting index, and take 1.
+F2C_ONES = {"incx", "incy", "inc", "ilo", "kl", "ku"}
+#: ...a caller-allocated integer workspace the routine writes through.
+F2C_IARR = {"ipiv", "jpvt", "iwork", "ipvt"}
+
+
+def f2c_int(name, pname):
+    """An integer argument, by the role its name gives it."""
+    p = (pname or "").rstrip("_")
+    if p in F2C_IARR:
+        return (["  integer %s[%d] = {0};" % (name, F2C_N * F2C_N)], name)
+    if p == "lwork":
+        return (["  integer %s = %d;" % (name, F2C_N * F2C_N)], "&" + name)
+    if p in F2C_ONES:
+        return (["  integer %s = 1;" % name], "&" + name)
+    # info is the status the routine writes back; everything else unrecognised
+    # is far more often a dimension than not, and a wrong dimension is caught
+    # by the routine's own argument check rather than by running off anything.
+    v = 0 if p == "info" else F2C_N
+    return (["  integer %s = %d;" % (name, v)], "&" + name)
+
+
+def f2c_real(elem):
+    """A floating-point argument: a matrix, a vector or a scalar, all of which
+    f2c passes by pointer, so the widest of the three is the safe shape."""
+    def make(name, pname):
+        return (["  %s %s[%d];" % (elem, name, F2C_N * F2C_N),
+                 '  klee_make_symbolic(%s, sizeof(%s), "%s");'
+                 % (name, name, name)], name)
+    return make
+
+
+#: The character flags, by name. A symbolic one is not a value to explore but a
+#: way to reach xerbla: LAPACK validates every one of them and returns without
+#: computing anything if it does not recognise it.
+F2C_FLAGS = {
+    "uplo": "U", "trans": "N", "transa": "N", "transb": "N", "transr": "N",
+    "side": "L", "diag": "N", "norm": "1", "job": "N", "jobz": "N",
+    "jobu": "N", "jobvt": "N", "jobvl": "N", "jobvr": "N", "jobq": "N",
+    "equed": "N", "fact": "N", "compq": "N", "compz": "N", "direct": "F",
+    "storev": "C", "pivot": "V", "type": "G", "way": "N", "sense": "N",
+    "balanc": "N", "howmny": "A", "eigsrc": "Q", "initv": "N", "vect": "Q",
+    "cmach": "E", "range": "A", "order": "B", "dist": "S", "sym": "N",
+    "pack": "N", "matrix": "G",
+}
+
+
+def f2c_char(name, pname):
+    v = F2C_FLAGS.get((pname or "").rstrip("_"), "N")
+    return (['  char %s[2] = "%s";' % (name, v)], name)
+
+
+def _f2c_types(elem):
+    return {
+        elem + " *":   f2c_real(elem),
+        "integer *":   f2c_int,
+        "char *":      f2c_char,
+        "logical *":   lambda n, p: (["  logical %s = 0;" % n], "&" + n),
+        "ftnlen":      lambda n, p: (["  ftnlen %s = 1;" % n], n),
+    }
+
+
+F2CQ_TYPES = _f2c_types("quadreal")
+F2CD_TYPES = _f2c_types("doublereal")
+F2CS_TYPES = _f2c_types("real")
+F2CH_TYPES = _f2c_types("halfreal")
+
+#: Through the front door, and BLIS's reasoning for what that means. LAPACK is
+#: two thirds auxiliary routines -- everything spelled `?la*` is internal by its
+#: own naming convention -- and those are reached, and covered, through the
+#: drivers that call them, exactly as CXSparse's cs_chol is measured through
+#: cs_cholsol. What is kept is the BLAS levels 1 to 3 and the factorisations,
+#: solves and condition estimates built on them.
+F2C_ROOTS = (r"(gemm|gemv|ger|trsm|trmm|trsv|trmv|symm|syrk|syr2k|dot|nrm2|"
+             r"asum|scal|axpy|copy|swap|rot|getrf|getf2|getrs|gesv|potrf|"
+             r"potf2|potrs|posv|geqrf|geqr2|gels|trtrs|gecon|lange|lacpy|"
+             r"laswp|lascl|lassq|lapy2)")
+
+
 LIBRARIES = {
     "cxsparse": {
         "header": "cs.h",
@@ -577,6 +931,200 @@ LIBRARIES = {
                      "<sunmatrix/sunmatrix_dense.h>", "<sunmatrix/sunmatrix_band.h>",
                      "<sunlinsol/sunlinsol_dense.h>", "<sunlinsol/sunlinsol_band.h>"],
     },
+    # SUNDIALS at binary128 and binary16. The library is written through
+    # sunrealtype throughout, so the type map above needs no change at all --
+    # only the macro that decides what sunrealtype is, which the driver has to
+    # define too because it includes the same headers.
+    "sundials-f128": {
+        "header": "sundials/sundials_nvector.h",
+        "internal": {},
+        "defines": {"SUNDIALS_QUAD_PRECISION": "1"},
+        "prefixes": ("N_V", "SUNMat", "SUNLinSol"),
+        # Which functions may *build* something is a wider question than which
+        # get drivers: an N_Vector needs a SUNContext, and nothing named
+        # SUNContext_Create is ever going to be a driver of its own.
+        "ctor_prefixes": ("N_V", "SUN"),
+        "types": SUNDIALS_TYPES,
+        # What SUNDIALS calls a length.
+        "sizes": {"sunindextype"},
+        # _Band wants a banded matrix where these makers build a dense one,
+        # and a band matrix adds no floating-point decision a dense one does
+        # not already make.
+        "exclude": r"(_Band$|GetID|GetType|LastFlag|NumIters|Resid|ResNorm|"
+                   r"SetZeroGuess|SetScalingVectors|Initialize$|Free|"
+                   r"GetArrayPointer|GetLength|GetCommunicator|GetVectorID|"
+                   r"Space|Print|Destroy|Clone|NewEmpty|SetArrayPointer|"
+                   r"GetLocalLength|GetSubvector|GetNumSubvectors|"
+                   r"GetVecAtIndex|SetVecAtIndex|BufSize|BufPack|BufUnpack|"
+                   r"Enable|Copy)",
+        # The N_Vector layer alone is mostly branch-free kernels. The dense
+        # matrix and linear-solver layers are where SUNDIALS makes decisions
+        # about floating-point values: SUNLinSolSolve_Dense factorises with
+        # partial pivoting, which is a comparison of magnitudes per column.
+        "includes": ["<sundials/sundials_context.h>", "<nvector/nvector_serial.h>",
+                     "<sundials/sundials_math.h>",
+                     "<sunmatrix/sunmatrix_dense.h>", "<sunmatrix/sunmatrix_band.h>",
+                     "<sunlinsol/sunlinsol_dense.h>", "<sunlinsol/sunlinsol_band.h>"],
+    },
+    "sundials-f16": {
+        "header": "sundials/sundials_nvector.h",
+        "internal": {},
+        "defines": {"SUNDIALS_HALF_PRECISION": "1"},
+        "prefixes": ("N_V", "SUNMat", "SUNLinSol"),
+        # Which functions may *build* something is a wider question than which
+        # get drivers: an N_Vector needs a SUNContext, and nothing named
+        # SUNContext_Create is ever going to be a driver of its own.
+        "ctor_prefixes": ("N_V", "SUN"),
+        "types": SUNDIALS_TYPES,
+        # What SUNDIALS calls a length.
+        "sizes": {"sunindextype"},
+        # _Band wants a banded matrix where these makers build a dense one,
+        # and a band matrix adds no floating-point decision a dense one does
+        # not already make.
+        "exclude": r"(_Band$|GetID|GetType|LastFlag|NumIters|Resid|ResNorm|"
+                   r"SetZeroGuess|SetScalingVectors|Initialize$|Free|"
+                   r"GetArrayPointer|GetLength|GetCommunicator|GetVectorID|"
+                   r"Space|Print|Destroy|Clone|NewEmpty|SetArrayPointer|"
+                   r"GetLocalLength|GetSubvector|GetNumSubvectors|"
+                   r"GetVecAtIndex|SetVecAtIndex|BufSize|BufPack|BufUnpack|"
+                   r"Enable|Copy)",
+        # The N_Vector layer alone is mostly branch-free kernels. The dense
+        # matrix and linear-solver layers are where SUNDIALS makes decisions
+        # about floating-point values: SUNLinSolSolve_Dense factorises with
+        # partial pivoting, which is a comparison of magnitudes per column.
+        "includes": ["<sundials/sundials_context.h>", "<nvector/nvector_serial.h>",
+                     "<sundials/sundials_math.h>",
+                     "<sunmatrix/sunmatrix_dense.h>", "<sunmatrix/sunmatrix_band.h>",
+                     "<sunlinsol/sunlinsol_dense.h>", "<sunlinsol/sunlinsol_band.h>"],
+    },
+    "cmsisdsp": {
+        "header": "arm_math_f16.h",
+        "internal": {},
+        "prefixes": ("arm_",),
+        "types": CMSISDSP_TYPES,
+        # The library is q7/q15/q31/f32/f64/f16 of nearly everything. This is
+        # the binary16 arm, so say so; cmsisdsp-f32 below is the same corpus at
+        # binary32 and is the control rather than a second benchmark.
+        "select": r"_f16$",
+        # Both arms are cut to the kernels that exist at *both* widths, not
+        # just the control. Four f16 functions have no f32 twin, and were the
+        # f16 arm to keep them the two driver lists would differ in length --
+        # so a sweep's stride would select different kernels from each, and
+        # the pair would stop being a pair. arm_math.h is included below so
+        # the AST knows which names exist at binary32.
+        "twin": ("_f16", "_f32"),
+        "exclude": CMSIS_EXCLUDE,
+        "min": CMSIS_MIN,
+        # HOST=ON is what CMSIS-DSP's own build defines; FP_BENCH_X86_FLOAT16
+        # is the typedef redirection build-lib.sh patches in. Both have to be
+        # in the driver too, because the driver includes the same header.
+        "defines": {"__GNUC_PYTHON__": "1", "FP_BENCH_X86_FLOAT16": "1"},
+        "includes": ["<arm_math_f16.h>", "<arm_math.h>"],
+    },
+    "cmsisdsp-f32": {
+        "header": "arm_math.h",
+        "internal": {},
+        "prefixes": ("arm_",),
+        "types": CMSISDSP32_TYPES,
+        "select": r"_f32$",
+        # The control: exactly the binary32 twins of the binary16 corpus, and
+        # nothing else. arm_math_f16.h is included above so that the AST knows
+        # which those are.
+        "twin": ("_f32", "_f16"),
+        "exclude": CMSIS_EXCLUDE,
+        "min": CMSIS_MIN,
+        "defines": {"__GNUC_PYTHON__": "1", "FP_BENCH_X86_FLOAT16": "1"},
+        "includes": ["<arm_math.h>", "<arm_math_f16.h>"],
+    },
+    "fftwq": {
+        "header": "fftw3.h",
+        "internal": {},
+        "prefixes": ("fftwq_",),
+        "types": FFTWQ_TYPES,
+        "pin": {"flags": "FFTW_ESTIMATE", "sign": "FFTW_FORWARD"},
+        # Keyed on fftwq_plan, not fftw_plan: without it the 27 planning
+        # drivers select an algorithm and compute nothing.
+        "after": {"fftwq_plan": "fftwq_execute(%s);"},
+        "exclude": r"(wisdom|_print|sprint|export|import|cleanup|forget|"
+                   r"alignment_of|set_timelimit|thread|malloc|free)",
+        "includes": ["<fftw3.h>"],
+    },
+    "cuba": {
+        # The quad build generates its own header, with cubareal a __float128.
+        # cuba.h is the binary64 one and declares a different ABI.
+        "header": "cubaq.h",
+        "internal": {},
+        # Vegas, Suave, Divonne, Cuhre: no prefix to select on, so the select
+        # below does all the narrowing.
+        "prefixes": ("",),
+        "types": CUBA_TYPES,
+        "pin": CUBA_PINS,
+        "preamble": CUBA_PREAMBLE,
+        "prologue": CUBA_PROLOGUE,
+        # The four algorithms, through the front door. Cuba also exports ll*
+        # variants, which are the same algorithms with a wider evaluation
+        # counter, and the Fortran-facing lowercase spellings -- CXSparse's
+        # reasoning, that recompiling one algorithm is not a second
+        # measurement of it.
+        "select": r"^(Vegas|Suave|Divonne|Cuhre)$",
+        "includes": ["<cubaq.h>"],
+    },
+    "f2clapack": {
+        "header": "f2clapack.h",
+        "internal": {},
+        # The routines are named by their leading letter, so there is no
+        # prefix to select on; the select below does the narrowing.
+        "prefixes": ("",),
+        "types": F2CQ_TYPES,
+        "select": r"^(q" + F2C_ROOTS + r"|iqamax)_$",
+        "includes": ["<f2clapack.h>"],
+    },
+    "f2clapack-f64": {
+        "header": "f2clapack.h",
+        "internal": {},
+        "prefixes": ("",),
+        "types": F2CD_TYPES,
+        "select": r"^(d" + F2C_ROOTS + r"|idamax)_$",
+        "includes": ["<f2clapack.h>"],
+    },
+    # f2cblaslapack ships the same routines at four widths -- half, single,
+    # double and quad, with a makefile target for each -- so this is the one
+    # place in the corpus where binary16, binary32, binary64 and binary128 can
+    # be compared over *identical* code rather than over four libraries that
+    # happen to be similar.
+    "f2clapack-f32": {
+        "header": "f2clapack.h",
+        "internal": {},
+        "prefixes": ("",),
+        "types": F2CS_TYPES,
+        "select": r"^(s" + F2C_ROOTS + r"|isamax)_$",
+        "includes": ["<f2clapack.h>"],
+    },
+    "f2clapack-f16": {
+        "header": "f2clapack.h",
+        "internal": {},
+        "prefixes": ("",),
+        "types": F2CH_TYPES,
+        "select": r"^(h" + F2C_ROOTS + r"|ihamax)_$",
+        "includes": ["<f2clapack.h>"],
+    },
+    "hdf5": {
+        # Written from a table rather than read from a header; see h5_drivers.
+        "header": "hdf5.h",
+        "internal": {},
+        "types": {},
+        "synthetic": h5_drivers,
+        "focus": "_Float16",
+        "includes": ["<hdf5.h>"],
+    },
+    "hdf5-f32": {
+        "header": "hdf5.h",
+        "internal": {},
+        "types": {},
+        "synthetic": h5_drivers,
+        "focus": "float",
+        "includes": ["<hdf5.h>"],
+    },
 }
 
 
@@ -590,9 +1138,18 @@ def declarations(include_dir, cfg, extra_cflags):
             f.write("#include %s\n" % inc)
     cmd = ["clang", "-Xclang", "-ast-dump=json", "-fsyntax-only",
            "-I", include_dir] + extra_cflags + [probe]
-    out = subprocess.run(cmd, capture_output=True, text=True).stdout
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    out = r.stdout
     if not out.strip():
         sys.exit("clang produced no AST; check --include and --cflags")
+    # A missing type or header does not stop clang emitting an AST -- it emits
+    # a *partial* one and reports the error on stderr. Generating from that
+    # silently produces drivers in a type that does not exist, which then fail
+    # to compile one at a time rather than failing here, once, with the reason.
+    errs = [l for l in r.stderr.splitlines() if ": error:" in l]
+    if errs:
+        sys.exit("clang could not parse the header cleanly:\n  " +
+                 "\n  ".join(errs[:5]))
     fns, enums = [], {}
     for node in json.loads(out).get("inner", []):
         kind = node.get("kind")
@@ -649,6 +1206,26 @@ def selected(pub, cfg):
     return True
 
 
+def _source(cfg, lines):
+    """The file a driver is: the library's headers, KLEE's, whatever preamble
+    the library needs, and then `lines`, which begin at `int main`.
+
+    Shared with the libraries whose drivers are written from a table rather
+    than read from a header, so that both kinds of driver are the same file
+    with a different middle.
+    """
+    return "\n".join([
+        "/* Generated by common/gen-drivers.py -- do not edit. */",
+        "",
+    ] + ["#define %s %s" % (d, v)
+         for d, v in sorted(cfg.get("defines", {}).items())] + [
+        "",
+    ] + ["#include %s" % i for i in cfg["includes"]] + [
+        '#include <klee/klee.h>',
+        "",
+    ] + cfg.get("preamble", []) + lines)
+
+
 def build_driver(pub, ret, params, cfg, ctor):
     """Driver source, or (None, reason) if some parameter cannot be made symbolic."""
     has_array = any(normalise(p) in ARRAY_TYPES for p, _ in params)
@@ -684,6 +1261,13 @@ def build_driver(pub, ret, params, cfg, ctor):
             lines.append("  klee_assume(a%d <= %d);" % (i, ARRAY_N))
             if not key.startswith("unsigned") and key != "size_t":
                 lines.append("  klee_assume(a%d >= 0);" % i)
+        # Some parameters have a lower bound the type does not say either. A
+        # CMSIS-DSP blockSize of zero underflows: arm_max_f16 computes
+        # blockSize - 1U and walks off the buffer. That is a precondition of
+        # the API rather than a bug, and only the library knows it.
+        lo = cfg.get("min", {}).get(pname)
+        if lo is not None:
+            lines.append("  klee_assume(a%d >= %s);" % (i, lo))
         body += lines
         # Some libraries need a word said about an operand after it exists --
         # see blis_post, where it is the structure BLIS checks for but cannot
@@ -706,18 +1290,9 @@ def build_driver(pub, ret, params, cfg, ctor):
     if hook:
         after.append("  " + hook % "r_")
 
-    return "\n".join([
-        "/* Generated by common/gen-drivers.py -- do not edit. */",
-        "",
-    ] + ["#define %s %s" % (d, v)
-         for d, v in sorted(cfg.get("defines", {}).items())] + [
-        "",
-    ] + ["#include %s" % i for i in cfg["includes"]] + [
-        '#include <klee/klee.h>',
-        "",
-    ] + cfg.get("preamble", []) + [
+    return _source(cfg, [
         "int main(void) {",
-    ] + body + [
+    ] + cfg.get("prologue", []) + body + [
         "  " + call,
     ] + after + [
         "  return 0;",
@@ -752,38 +1327,62 @@ def main():
                 if stale.endswith(".tsv") or "Generated by" in f.readline():
                     os.remove(path)
 
-    decls, enums = declarations(args.include, cfg, args.cflags.split())
-    ctor = Constructor(decls, cfg["types"], enums,
-                       lambda elem, name: sym_array(elem, name), ARRAY_N,
-                       prefixes=cfg.get("ctor_prefixes")
-                                or cfg.get("prefixes", ())
-                                or tuple(cfg.get("internal", {})),
-                       pins=cfg.get("pin", {}),
-                       sizes=cfg.get("sizes", ()))
+    if "synthetic" in cfg:
+        # A library whose drivers cannot come from its header: the
+        # signatures are private, or the API takes handles rather than
+        # types. What the table cannot express, it does not emit, so
+        # there is nothing to skip.
+        symbols, skipped = [], []
+        for name, src, sym in cfg["synthetic"](cfg):
+            with open(os.path.join(args.out, name + ".c"), "w") as f:
+                f.write(src)
+            symbols.append((name, sym))
+        emitted = len(symbols)
+    else:
+        decls, enums = declarations(args.include, cfg, args.cflags.split())
+        ctor = Constructor(decls, cfg["types"], enums,
+                           lambda elem, name: sym_array(elem, name), ARRAY_N,
+                           prefixes=cfg.get("ctor_prefixes")
+                                    or cfg.get("prefixes", ())
+                                    or tuple(cfg.get("internal", {})),
+                           pins=cfg.get("pin", {}),
+                           sizes=cfg.get("sizes", ()))
 
-    # A header can declare the same function twice -- GMP does, for the ones it
-    # also offers as __GMP_EXTERN_INLINE -- and writing the driver twice would
-    # make the count larger than the set.
-    seen = set()
-    emitted, skipped, symbols = 0, [], []
-    for name, ret, params in decls:
-        pub = public_name(name, cfg)
-        if pub is None or pub in seen:
-            continue
-        seen.add(pub)
-        if not args.all and not selected(pub, cfg):
-            continue
-        src, reason = build_driver(pub, ret, params, cfg, ctor)
-        if src is None:
-            skipped.append((pub, reason))
-            continue
-        with open(os.path.join(args.out, pub + ".c"), "w") as f:
-            f.write(src)
-        # The public spelling is not always the symbol. GMP's mpf_add is a
-        # macro over __gmpf_add, and the coverage report knows only the latter,
-        # so the mapping has to travel with the drivers.
-        symbols.append((pub, name))
-        emitted += 1
+        # A header can declare the same function twice -- GMP does, for the ones it
+        # also offers as __GMP_EXTERN_INLINE -- and writing the driver twice would
+        # make the count larger than the set.
+        seen = set()
+        # Every name the header declares, for the twin filter below.
+        declared = {name for name, _, _ in decls}
+        emitted, skipped, symbols = 0, [], []
+        for name, ret, params in decls:
+            pub = public_name(name, cfg)
+            if pub is None or pub in seen:
+                continue
+            seen.add(pub)
+            if not args.all and not selected(pub, cfg):
+                continue
+            # A control arm emits only the drivers whose counterpart at the
+            # other width exists, so that the two corpora are one set of
+            # kernels at two formats rather than two different benchmarks.
+            # CMSIS-DSP's f32 API is half again the size of its f16 one, and
+            # a comparison across formats over a set that differs between them
+            # is not a comparison of formats.
+            twin = cfg.get("twin")
+            if twin and pub.endswith(twin[0]) and \
+                    pub[:-len(twin[0])] + twin[1] not in declared:
+                continue
+            src, reason = build_driver(pub, ret, params, cfg, ctor)
+            if src is None:
+                skipped.append((pub, reason))
+                continue
+            with open(os.path.join(args.out, pub + ".c"), "w") as f:
+                f.write(src)
+            # The public spelling is not always the symbol. GMP's mpf_add is a
+            # macro over __gmpf_add, and the coverage report knows only the latter,
+            # so the mapping has to travel with the drivers.
+            symbols.append((pub, name))
+            emitted += 1
 
     with open(os.path.join(args.out, "functions.tsv"), "w") as f:
         f.write("driver\tcoverage symbol\n")

@@ -21,6 +21,19 @@ LIB=$1 name=$2 label=$3 search=${4:-dfs}
 OUT=${FP_BENCH_OUT:-$WORK/$LIB/runs}
 
 BUDGET=${BUDGET:-60}                  # exploration budget, seconds
+# Arguments a particular *library* needs, as opposed to a particular solver
+# configuration -- those come from the environment, above.
+case $LIB in
+  hdf5|hdf5-f32)
+    # H5open() runs before any conversion does: it calls atexit, which is a
+    # failed external call without a modelled libc, and it is 75M instructions
+    # and about half a minute before the first comparison. The budget has to
+    # allow for the library starting up as well as for the arithmetic, or the
+    # whole of it goes on initialisation and the run measures nothing.
+    LIB_ARGS="--libc=uclibc --posix-runtime"
+    BUDGET=${HDF5_BUDGET:-$((BUDGET * 3))} ;;
+  *) LIB_ARGS="" ;;
+esac
 # 5s, not 30s. A query that is going to time out burns the whole cap and then
 # has its state discarded, and on this corpus that tail is 29% of all solver
 # time for a tenth of a percent of the queries. Measured over the 45 drivers
@@ -71,6 +84,7 @@ timeout -s KILL "$HARD" "$KLEE" \
   --max-solver-time="${MAX_SOLVER_TIME}s" \
   --max-memory="$MAX_MEMORY" \
   $LINK_LIBM \
+  $LIB_ARGS \
   $EXTRA_ARGS \
   "$WORK/$LIB/obj/$name.bc" > "$log" 2>&1
 rc=$?

@@ -47,14 +47,31 @@ export PAR=${PAR:-12}
 export MAX_MEMORY=${MAX_MEMORY:-2000}
 export BUDGET=${BUDGET:-60}
 
-#            library   stride
-LIBS=(  "gsl      10"
-        "openlibm  3"
-        "blis      4"
-        "sundials  3"
-        "gmp       2"
-        "fftw      1"
-        "cxsparse  1" )
+# The two arms of a precision axis must carry the *same* stride, and their
+# driver lists are generated to correspond kernel for kernel, so that a stride
+# selects the same kernels from each. A sweep that samples two formats
+# differently is not a comparison of formats.
+#
+#            library       stride
+LIBS=(  "gsl          10"
+        "openlibm      3"
+        "blis          4"
+        "sundials      3"
+        "sundials-f128 3"
+        "sundials-f16  3"
+        "gmp           2"
+        "fftw          1"
+        "cxsparse      1"
+        "fftwq         1"
+        "cuba          1"
+        "f2clapack     1"
+        "f2clapack-f64 1"
+        "f2clapack-f32 1"
+        "f2clapack-f16 1"
+        "cmsisdsp      3"
+        "cmsisdsp-f32  3"
+        "hdf5          1"
+        "hdf5-f32      1" )
 
 for entry in "${LIBS[@]}"; do
   set -- $entry
