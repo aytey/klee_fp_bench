@@ -912,6 +912,115 @@ measurements, in a header comment, against this very corpus. Its figures for
 one profile would not reproduce here -- and the reason was that this suite had
 been holding the width at 53 while the branch measured at 64.
 
+## What the corpus actually asks the solver, by width
+
+The suite now spans binary16 to binary128, so the first question about it is
+what fraction of its queries are floating-point at all, and at which widths.
+`common/dump-queries.sh` over every library at `sweep-all.sh`'s own strides --
+438 drivers, a 10-second budget, split into one file per query -- and
+`common/query-sorts.py` over the result:
+
+| | queries containing it |
+| --- | ---: |
+| binary16 | 989 |
+| binary32 | 1,272 |
+| binary64 | 16,737 |
+| x87 fp80 | 0 |
+| binary128 | 680 |
+| **any floating-point sort** | **18,442 of 41,456 (44.5%)** |
+
+The columns overlap, and where they overlap is informative: 956 queries carry
+binary32 *and* binary64 together, which is OpenLibm's float functions
+evaluating in double, and 137 carry binary16, binary32 and binary64 at once,
+which is klee-uclibc's `logf` and `expf` inside CMSIS-DSP's half-precision
+kernels. 15,644 are binary64 alone. x87 fp80 is zero throughout, as it should
+be: `long double` is skipped everywhere.
+
+**Match `to_fp` and not just `FloatingPoint`.** The first pass of this census
+matched the sort name alone and reported 7.4%. That is wrong by a factor of
+six, because the sort name appears only where something is *declared* of that
+sort, and KLEE's ordinary output is a bitvector reinterpreted as a float:
+`((_ to_fp 11 53) @def0)` is a binary64 query that never writes the word. The
+error was visible as GMP reporting zero floating-point queries when the whole
+reason `mpf` is in the corpus is its double conversions -- it has 11,750.
+
+Two rows are artefacts of the short budget rather than facts about the
+libraries. HDF5 reports 44 queries and almost no binary16, because `H5open()`
+runs 75M instructions before the first conversion and a 10-second budget never
+reaches the arithmetic; measured properly its queries are binary16 and nothing
+else. OpenLibm is 18 of its 47 sampled drivers, its transcendentals being slow
+to drain. FFTW's zero, on the other hand, is real at both widths -- see below.
+
+### Instructions are not queries, and here they run backwards
+
+`getrf`, one routine from f2cblaslapack, at the four widths the same source
+compiles to, 60-second budget each:
+
+| | instructions | queries | asserts | asserts/query |
+| --- | ---: | ---: | ---: | ---: |
+| binary16 | 67,293 | 195 | 4,928 | 25.3 |
+| binary32 | 74,582 | 88 | 2,079 | 23.6 |
+| binary64 | 381,476 | 58 | 1,283 | 22.1 |
+| binary128 | 5,607,102 | 21 | 313 | 14.9 |
+
+Instructions rise 83x while queries fall by a factor of nine. They are not
+merely uncorrelated, they are inverted, and the reason is worth knowing before
+anyone quotes an instruction count as solver load. `common/queries-by-function.py`
+attributes both to the subprogram that caused them, out of KLEE's own
+`run.istats`: **`qlamc4_` is 96.5% of the instructions at binary128 and issues
+no queries at all.** It is LAPACK determining machine epsilon by iterated
+halving, a loop whose length scales with the exponent range -- 5.4M
+instructions at binary128 against 352k at binary64, all of it concrete. The
+queries that do reach the solver come from about 1,600 instructions in
+`qgetrf2_`, `qtrsm_` and `qlaswp_`.
+
+Note also that a query is not a constraint. Each carries the whole path
+condition, so the narrow formats show *more* asserts per query: they explore
+deeper before the budget runs out.
+
+### The optimiser decides which comparisons become queries
+
+The single largest threat to reading any of this as a property of the solvers.
+A comparison that if-converts to a `select` never becomes a path condition and
+never reaches the solver, and at `-O2` that is the common case for the
+reductions this corpus is full of:
+
+* `iqamax_`, the pivot search `qgetf2` calls once per column, carries 14
+  `fcmp fp128` and 18 `select`. Its driver runs 117 instructions and issues
+  **zero** queries.
+* CMSIS-NN's `arm_maximum_f16` carries 52 `fcmp half`, all consumed by
+  `select`; five of six hand-written drivers dumped nothing.
+* SUNDIALS' `N_VMaxNorm` if-converts at binary16 and binary64 -- 1 test each --
+  and **branches** at binary128, forking to 256. Same source, same flags.
+
+The last is the one to worry about: part of what a width comparison measures on
+this corpus is at which widths LLVM declined to if-convert. It is not visible
+without reading the IR, so a driver's `fcmp` count should be checked against
+its query count before its width behaviour is believed.
+
+What does branch, in f2cblaslapack, is the zero and exception tests rather than
+the pivot search -- `qgetf2` on whether the pivot is zero (2 of 3),
+`qpotf2` on positive-definiteness (2 of 2), `qtrsm` on `alpha` (13 of 13),
+`qgemm` on `alpha` and `beta` (10 of 10).
+
+### Where the non-floating-point queries come from
+
+Of the 23,014 queries carrying no floating-point sort, the largest single
+source is a harness decision rather than a library: the generator makes every
+integer parameter symbolic and bounds it, and a *shape* left symbolic
+manufactures integer queries and no floating-point ones. FFTW is the clean
+case. Its drivers leave the transform length `n` symbolic in [0,8], and every
+query it issues is the planner factorising it -- `bvsrem @def0 5`,
+`bvslt @def0 1` -- while the symbolic data is never branched on because a
+transform is branch-free. Pinning `n` to 8 takes `fftw_plan_dft_1d` from 56
+queries, none floating-point, to **none at all**, with 1.6M instructions of
+transform still executed.
+
+The three arms whose integer arguments are pinned concrete -- `f2clapack`,
+`f2clapack-f64`, `cuba` -- are at 100% floating-point density. `fftw` and
+`fftwq` are at 0%, and `sundials` at 3%. That is the whole spread, and it
+tracks one design choice.
+
 ## What this does not establish
 
 **One run, one machine, no repetition.** There is no variance estimate here.
@@ -952,6 +1061,18 @@ abstraction width and the preprocessing passes -- KLEE exposes exactly one,
 below -- the abstraction default turns out to be right, the missing session
 did not -- but the SAT backend, rewrite level and abstraction width remain
 unreachable from KLEE and unmeasured.
+
+**The width census is a shape, not a census.** Its 41,456 queries come from a
+10-second budget, which is a tenth of what a sweep gives a driver -- enough to
+say which sorts a library's queries carry and not enough to say how many it
+would eventually issue. Two of its rows are known artefacts of that, named
+above. It was also taken on a machine running other work, which does not matter
+for counting sorts and would matter for anything timed.
+
+**The four-width axis is one routine.** `getrf` at binary16 through binary128
+is identical code with one variable changed, which is the right experiment, but
+it is a single routine and `?lamc4` dominates its instruction count. It says
+what width costs that routine; it is not a corpus-wide result.
 
 **The replayed corpus is not the hard tail.** It was dumped from Z3-driven
 runs, so it carries Z3's query distribution, and only 15 of its 1,082 queries
