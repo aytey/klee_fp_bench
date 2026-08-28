@@ -110,8 +110,9 @@ differently overrides rather than edits.
 | a Python env | `PYENV` | holds `wllvm`; some libraries' configure needs it on `PATH` |
 | working area | `FP_BENCH_WORK` | where sources, both builds, drivers and runs land — tens of GB, and fastest on a RAM disk |
 | STP with the terminator | `STP_TERM` | the `lib64` of an STP whose MiniSat can be stopped mid-search |
+| libquadmath sources | `QM_SRC` | a GCC source tree's `libquadmath/` directory; only `common/build-libquadmath.sh` reads it |
 
-That last one is not optional for timing work. Without it `--max-solver-time`
+`STP_TERM` is not optional for timing work. Without it `--max-solver-time`
 is only enforced between calls into the SAT solver, so a query that goes deep
 into MiniSat overruns the cap and the run stops being a measurement of the cap.
 
@@ -216,6 +217,76 @@ unexplored, and every later query differs. `split-queries.py` and
 `replay-queries.sh` take a dumped corpus and run both solvers over identical
 files, which is the only comparison with nothing else in it. `RESULTS.md` reads
 both, and says where they disagree.
+
+## Quad precision
+
+Every library above is measured at binary32 and binary64. binary128 is the
+format where the queries get genuinely hard -- an `fp.div` on quads blasts to
+a ~227-bit division where a double gives ~107 -- so it is worth being able to
+reach, and `common/build-libquadmath.sh` is what reaches it.
+
+Numerical code gets there through a macro block, not through a type:
+
+    #ifdef FLOAT128
+    #include <quadmath.h>
+    #define REAL __float128
+    #define sin  sinq
+    #define exp  expq
+    #define sqrt sqrtq
+    ...
+    #define atof(a) strtoflt128((a), NULL)
+    #endif
+
+so the kernel underneath is written once and says nothing about its
+precision. `quadmath/quad_example.c` is a worked example of exactly that
+shape, buildable at either precision from one source.
+
+Clang needs nothing special for the arithmetic: `__float128` compiles to
+native `fp128` IR -- `fadd`, `fcmp`, `fpext`, `fptrunc` -- with the soft-float
+lowering happening in the backend, so KLEE sees genuine quad operations. What
+is not free is libquadmath, which ships as part of GCC and has no standalone
+build. The script compiles its sources directly and generates the `config.h`
+and the `__builtin_huge_valq` shim that GCC's own build would have supplied:
+
+    common/build-libquadmath.sh          # 95 sources -> libquadmath-math.bc
+    llvm-link -o prog_linked.bc prog.bc libquadmath-math.bc
+
+It builds `math/` only, and refuses to write a partial library. `printf/` and
+`strtod/` cannot be built with clang at all -- `printf_fp.c` uses GCC nested
+functions -- and both reference libgcc's `__clz_tab`, which kills a KLEE run
+at global-init rather than at the call. So `quadmath_snprintf` and
+`strtoflt128` are unavailable, which means the `atof` line of the macro block
+above is the one entry point with no path. Everything else has one.
+
+### Why it is not an eighth library here
+
+The corpus wants drivers that reach the arithmetic and finish. Measured one
+function at a time, with a symbolic quad argument in (0,10), a 60s budget and
+a 5s query cap under Bitwuzla:
+
+| | outcome |
+| --- | --- |
+| `fabsq` `sqrtq` `floorq` `ceilq` `truncq` `modfq` `powq` | explored, 37-153 instructions |
+| `fmodq` | 8,443 instructions, bounded by the exploration budget |
+| `expq` `logq` `sinq` `cosq` `tanq` `atanq` | query timeouts |
+
+The second group is the interesting half and it is the half that does not
+finish. `sinq` and `cosq` reduce their argument through a 5,312-byte table
+indexed by a symbolic value, which goes to the solver whole.
+
+The control is what settles it: the same sweep against libm at binary64 has
+the same shape -- `exp`, `log`, `sin`, `cos`, `tan` and `atan` all time out
+there too. This is the standing difficulty of symbolically executing a libm
+implementation rather than anything quad introduces. A libquadmath library
+here would be a corpus whose measurable half is branch-free and whose
+interesting half never returns, which is the shape of measurement this suite
+exists to avoid -- the same reason OSQP was dropped below.
+
+The obvious use for quad here is therefore not a library at all but
+`reproducers/`. A single quad `fp.div` would isolate the same division
+mechanism the two reproducers already there isolate at binary64, at twice the
+width and for the cost of one query rather than a driver. That has not been
+measured yet.
 
 ## Considered and not included
 
