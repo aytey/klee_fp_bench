@@ -1,5 +1,14 @@
 # Does STP decide these queries faster than Bitwuzla?
 
+> **Measured 2026-08-26 to 2026-08-28, and not re-measured since.** Read this as
+> a record of what those sweeps found, not as a current comparison. The STP in
+> these numbers predates its floating-point abstraction, which has since been
+> merged into `stp/stp` master and moves them substantially; the sections below
+> say which build each finding came from, including the one taken against a
+> tree 27 commits behind master. `common/configs/*.tsv` holds the
+> configurations and `git log` the order they were run in.
+
+
 Yes, on solver time, by about 23% per driver — and the qualifications matter
 more than the number. The win is concentrated in a few of the seven libraries,
 it does not convert into coverage, and two settings of STP itself are further
